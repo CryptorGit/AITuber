@@ -126,6 +126,7 @@
 
   const PROVIDER_PRESETS = {
     local: { stt: 'local', llm: 'gemini', tts: 'google' },
+    google: { stt: 'google', llm: 'gemini', tts: 'google' },
   };
 
   function getProviderValue(node, fallback) {

@@ -180,11 +180,13 @@
         <select id="providerPreset">
           <option value="">(manual)</option>
           <option value="local">local (whisper + gemini + google)</option>
+          <option value="google">google (stt + gemini + google)</option>
         </select>
         <div class="muted">Applies to /stt/audio and /web/submit only.</div>
 
         <label style="margin-top:12px">STT provider</label>
         <select id="sttProvider">
+          <option value="google">google (Cloud Speech-to-Text)</option>
           <option value="local">local (faster-whisper)</option>
           <option value="openai">openai</option>
         </select>

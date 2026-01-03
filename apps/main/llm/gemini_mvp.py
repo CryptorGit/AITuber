@@ -83,7 +83,15 @@ class GeminiMVP:
                 # plain text if the model doesn't follow schema.
                 try:
                     obj = self._extract_json(text)
-                    return LLMOut.model_validate(obj)
+                    try:
+                        return LLMOut.model_validate(obj)
+                    except Exception:
+                        # Common failure mode: model wraps the answer in {"response": "..."}
+                        if isinstance(obj, dict):
+                            r = obj.get("response")
+                            if isinstance(r, str) and r.strip():
+                                return self._wrap_plain_text(text=r, reason="gemini_response_field")
+                        raise
                 except Exception:
                     return self._wrap_plain_text(text=text, reason="gemini_plain_text")
             except concurrent.futures.TimeoutError:

@@ -9,6 +9,62 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _decode_env_text(raw: bytes) -> str:
+    for enc in ("utf-8-sig", "utf-8"):
+        try:
+            return raw.decode(enc)
+        except Exception:
+            continue
+    return ""
+
+
+def _load_env_kv_file(path: Path, *, override: bool) -> None:
+    """Load a simple KEY=VALUE file into os.environ.
+
+    - BOM-tolerant (Windows)
+    - Does not interpret backslash escapes (safe for C:\\Users\\...)
+    - Strips optional surrounding quotes
+    """
+    try:
+        if not path.exists():
+            return
+        text = _decode_env_text(path.read_bytes())
+        if not text:
+            return
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            if override or key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        return
+
+
+def _find_repo_root(start: Path) -> Path:
+    """Best-effort find repository root from a file path."""
+    p = start.resolve()
+    for parent in [p] + list(p.parents):
+        try:
+            if (parent / ".git").exists():
+                return parent
+            if (parent / "requirements.txt").exists() and (parent / "apps").is_dir():
+                return parent
+        except Exception:
+            continue
+    # Fallback: assume 3 levels up from apps/main/core/settings.py
+    return start.resolve().parents[3]
+
+
 class Settings(BaseSettings):
     """Runtime settings.
 
@@ -74,38 +130,32 @@ class Settings(BaseSettings):
 
 
 def load_settings(*, env_file: Optional[Path] = None) -> Settings:
-    # pydantic-settings can read env vars directly; we only use python-dotenv for .env files.
-    try:
-        from dotenv import load_dotenv
+    # pydantic-settings reads os.environ; we load .env files ourselves to avoid
+    # Windows backslash escape issues in python-dotenv.
+    repo_root = _find_repo_root(Path(__file__))
 
-        repo_root = Path(__file__).resolve().parents[2]
+    def _resolve(p: Path) -> Path:
+        return p if p.is_absolute() else (repo_root / p).resolve()
 
-        def _resolve(p: Path) -> Path:
-            return p if p.is_absolute() else (repo_root / p).resolve()
-
-        if env_file is not None:
-            load_dotenv(dotenv_path=str(_resolve(env_file)), override=True)
+    if env_file is not None:
+        _load_env_kv_file(_resolve(env_file), override=True)
+    else:
+        # AITUBER_ENV_FILE can point to an arbitrary env filename.
+        env_file_var = (os.getenv("AITUBER_ENV_FILE") or "").strip()
+        if env_file_var:
+            _load_env_kv_file(_resolve(Path(env_file_var)), override=True)
         else:
-            # AITUBER_ENV_FILE can point to an arbitrary env filename.
-            env_file_var = (os.getenv("AITUBER_ENV_FILE") or "").strip()
-            if env_file_var:
-                load_dotenv(dotenv_path=str(_resolve(Path(env_file_var))), override=True)
-            else:
-                # Prefer .env/ folder layout
-                env_dir = repo_root / ".env"
-                if env_dir.is_dir():
-                    # Main app convention: .env/.env.main
-                    default_env = env_dir / ".env.main"
-                    if default_env.exists():
-                        load_dotenv(dotenv_path=str(default_env), override=True)
-                    else:
-                        legacy_env = env_dir / ".env"
-                        if legacy_env.exists():
-                            load_dotenv(dotenv_path=str(legacy_env), override=True)
+            # Prefer .env/ folder layout
+            env_dir = repo_root / ".env"
+            if env_dir.is_dir():
+                # Main app convention: .env/.env.main
+                default_env = env_dir / ".env.main"
+                if default_env.exists():
+                    _load_env_kv_file(default_env, override=True)
                 else:
-                    load_dotenv(override=True)
-    except Exception:
-        pass
+                    legacy_env = env_dir / ".env"
+                    if legacy_env.exists():
+                        _load_env_kv_file(legacy_env, override=True)
 
     # Hard-lock providers regardless of env/console settings.
     os.environ["AITUBER_LLM_PROVIDER"] = "gemini"
@@ -114,7 +164,7 @@ def load_settings(*, env_file: Optional[Path] = None) -> Settings:
 
     # Resolve GOOGLE_APPLICATION_CREDENTIALS from .env/ folder if not set.
     try:
-        repo_root = Path(__file__).resolve().parents[2]
+        repo_root = _find_repo_root(Path(__file__))
         env_dir = repo_root / ".env"
         gac = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
         if not gac and env_dir.is_dir():

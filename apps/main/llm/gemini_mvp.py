@@ -75,8 +75,17 @@ class GeminiMVP:
                     fut = ex.submit(_call)
                     resp = fut.result(timeout=timeout_seconds)
                 text = (resp.text or "").strip()
-                obj = self._extract_json(text)
-                return LLMOut.model_validate(obj)
+                if not text:
+                    last_err = "empty_response"
+                    continue
+
+                # Prefer structured JSON (for motion/emotion/safety), but accept
+                # plain text if the model doesn't follow schema.
+                try:
+                    obj = self._extract_json(text)
+                    return LLMOut.model_validate(obj)
+                except Exception:
+                    return self._wrap_plain_text(text=text, reason="gemini_plain_text")
             except concurrent.futures.TimeoutError:
                 last_err = f"TimeoutError: gemini call exceeded {timeout_seconds}s"
                 continue
@@ -88,6 +97,19 @@ class GeminiMVP:
         if last_err:
             reason = (reason + " | " + last_err)[:220]
         return self._fallback(user_text=user_text, reason=reason)
+
+    def _wrap_plain_text(self, *, text: str, reason: str) -> LLMOut:
+        t = (text or "").strip()
+        if not t:
+            t = "（空の返答）"
+        overlay = t[:60]
+        return LLMOut(
+            speech_text=t,
+            overlay_text=overlay,
+            emotion="neutral",
+            motion_tags=["neutral"],
+            safety={"needs_manager_approval": True, "notes": reason},
+        )
 
     def _build_prompt(
         self,

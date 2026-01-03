@@ -949,11 +949,15 @@ def _startup() -> None:
 # NOTE: We keep these mounts (as requested) for simple asset delivery.
 # /stage and /console are served via web/index.html which redirects to stage.html/console.html.
 Path("web/main").mkdir(parents=True, exist_ok=True)
-Path("web/main/models").mkdir(parents=True, exist_ok=True)
 Path("data/audio").mkdir(parents=True, exist_ok=True)
 app.mount("/stage", StaticFiles(directory="web/main", html=True), name="stage")
 app.mount("/console", StaticFiles(directory="web/main", html=True), name="console")
-app.mount("/models", StaticFiles(directory="web/main/models", html=True), name="models")
+# NOTE: /models is optional; create the folder only when the user uploads models.
+try:
+    if Path("web/main/models").is_dir():
+        app.mount("/models", StaticFiles(directory="web/main/models", html=True), name="models")
+except Exception:
+    pass
 app.mount("/audio", StaticFiles(directory="data/audio", html=True), name="audio")
 
 
@@ -975,10 +979,8 @@ def models_index() -> Dict[str, Any]:
     Returned paths are relative to /models.
     """
     root = _web_models_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    if not root.is_dir():
+        return {"ok": True, "items": []}
 
     out: List[str] = []
     try:

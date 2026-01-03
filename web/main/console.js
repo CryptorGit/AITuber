@@ -187,6 +187,8 @@
     if (sttBusy) return;
     sttBusy = true;
     try {
+      // Clear previous text immediately so it never lingers between recognitions.
+      resetSttBuffer();
       if (el.speechStatus) el.speechStatus.textContent = 'STT: sending audio...';
       const form = new FormData();
       form.append('lang', 'ja-JP');

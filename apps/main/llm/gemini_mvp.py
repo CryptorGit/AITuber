@@ -129,12 +129,9 @@ class GeminiMVP:
     ) -> str:
         sys = (system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
         instr = read_prompt_text(name="gemini_json_instructions").strip()
-        if not instr:
-            instr = "必ずJSONのみを出力してください。"
+        header = (sys + "\n" + instr).strip() if instr else sys
         return (
-            sys
-            + "\n"
-            + instr
+            header
             + "\n\n"
             "# 入力\n"
             f"user_text: {user_text}\n\n"

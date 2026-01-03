@@ -5,6 +5,7 @@ let isRecording = false;
 let currentTurnId = null;
 let currentCandidates = null;
 let currentSttRef = null;
+let currentRawSttText = null;
 let currentFewshotUsed = null;
 let currentGenRaw = null;
 
@@ -16,6 +17,20 @@ const btnSend = document.getElementById('btnSend');
 const sttText = document.getElementById('sttText');
 const candidatesEl = document.getElementById('candidates');
 const reasonTagsEl = document.getElementById('reasonTags');
+const reasonCountEl = document.getElementById('reasonCount');
+
+const REASON_TAGS = [
+  { id: 'tempo_good', desc: 'テンポ良い/短い' },
+  { id: 'metaphor_good', desc: '比喩が刺さる' },
+  { id: 'punch_good', desc: '追い打ちが効いている' },
+  { id: 'wrap_good', desc: 'オチ/巻き取りが良い' },
+  { id: 'character_good', desc: 'キャラが立っている' },
+  { id: 'too_long', desc: '長い' },
+  { id: 'too_safe', desc: '無難/正論' },
+  { id: 'unclear', desc: '意味が分からない' },
+  { id: 'too_mean', desc: '刺し過ぎ/危険寄り' },
+  { id: 'off_context', desc: '状況ズレ' },
+];
 
 function setStatus(text) {
   elStatus.textContent = text;
@@ -41,15 +56,69 @@ function clearTurn() {
   currentTurnId = null;
   currentCandidates = null;
   currentSttRef = null;
+  currentRawSttText = null;
   currentFewshotUsed = null;
   currentGenRaw = null;
   sttText.value = '';
   candidatesEl.innerHTML = '';
-  reasonTagsEl.value = '';
+  clearReasonTags();
   setError('');
   setStatus('次ターン準備完了');
   setButtons({ start: true, stop: false, send: false });
   btnStart.focus();
+}
+
+function renderReasonTags() {
+  if (!reasonTagsEl) return;
+  reasonTagsEl.innerHTML = '';
+  for (const t of REASON_TAGS) {
+    const wrap = document.createElement('div');
+    wrap.className = 'reasonTag';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = t.id;
+    cb.id = `tag_${t.id}`;
+    cb.addEventListener('change', updateReasonCount);
+
+    const label = document.createElement('label');
+    label.setAttribute('for', cb.id);
+    label.textContent = t.id;
+
+    const desc = document.createElement('div');
+    desc.className = 'desc';
+    desc.textContent = t.desc;
+
+    const textWrap = document.createElement('div');
+    textWrap.appendChild(label);
+    textWrap.appendChild(desc);
+
+    wrap.appendChild(cb);
+    wrap.appendChild(textWrap);
+    reasonTagsEl.appendChild(wrap);
+  }
+  updateReasonCount();
+}
+
+function selectedReasonTags() {
+  const tags = [];
+  const els = document.querySelectorAll('#reasonTags input[type="checkbox"]');
+  for (const el of els) {
+    if (el.checked) tags.push(el.value);
+  }
+  return tags;
+}
+
+function clearReasonTags() {
+  const els = document.querySelectorAll('#reasonTags input[type="checkbox"]');
+  for (const el of els) el.checked = false;
+  updateReasonCount();
+}
+
+function updateReasonCount() {
+  if (!reasonCountEl) return;
+  const n = selectedReasonTags().length;
+  reasonCountEl.textContent = `選択タグ数: ${n}`;
 }
 
 function renderCandidates(candidates) {
@@ -138,7 +207,8 @@ async function onRecorded(blob) {
   currentTurnId = trJson.turn_id;
   currentSttRef = { audio_path: trJson.audio_path, raw: trJson.stt_raw };
 
-  sttText.value = trJson.text || '';
+  currentRawSttText = trJson.text || '';
+  sttText.value = currentRawSttText;
   sttText.focus();
   sttText.select();
 
@@ -170,9 +240,8 @@ function selectedWinnerIndex() {
 }
 
 function parseReasonTags() {
-  const raw = (reasonTagsEl.value || '').trim();
-  if (!raw) return [];
-  return raw.split(',').map(s => s.trim()).filter(Boolean);
+  // Always return array (never null)
+  return selectedReasonTags();
 }
 
 async function sendLabel() {
@@ -186,6 +255,7 @@ async function sendLabel() {
   const payload = {
     turn_id: currentTurnId,
     input_text: sttText.value || '',
+    raw_stt_text: currentRawSttText || null,
     candidates: currentCandidates,
     winner_index: selectedWinnerIndex(),
     reason_tags: parseReasonTags(),
@@ -236,3 +306,4 @@ window.addEventListener('keydown', (ev) => {
 });
 
 clearTurn();
+renderReasonTags();

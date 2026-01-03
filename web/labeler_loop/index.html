@@ -17,7 +17,6 @@
         <div class="row">
           <button id="btnStart" class="btn primary">録音開始</button>
           <button id="btnStop" class="btn" disabled>録音停止</button>
-          <button id="btnSend" class="btn" disabled>送信</button>
         </div>
         <div class="hint">Space: 録音開始/停止 | Enter: 送信</div>
         <div id="error" class="error" hidden></div>
@@ -35,7 +34,14 @@
 
       <section class="panel">
         <h2 class="subtitle">理由タグ（任意）</h2>
-        <input id="reasonTags" class="input" placeholder="metaphor_good, tempo_good" />
+        <div class="reasonMeta">
+          <div id="reasonCount" class="hint">選択タグ数: 0</div>
+        </div>
+        <div id="reasonTags" class="reasonTags"></div>
+
+        <div class="sendBar">
+          <button id="btnSend" class="btn primary" disabled>送信</button>
+        </div>
       </section>
     </main>
 

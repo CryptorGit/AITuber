@@ -124,3 +124,36 @@ textarea {
   color: #ffd0d0;
   white-space: pre-wrap;
 }
+
+.reasonTags {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.reasonTag {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #2a3a52;
+  background: #0b1220;
+}
+
+.reasonTag label {
+  white-space: nowrap;
+}
+
+.reasonTag .desc {
+  color: #9fb0c0;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.sendBar {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}

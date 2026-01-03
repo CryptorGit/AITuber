@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +166,11 @@ def _try_generate_with_models(client: Any, types_mod: Any, models: list[str], pr
                 "provider": "google-genai",
                 "model": m,
                 "temperature": temperature,
+                "params": {
+                    "temperature": temperature,
+                    "response_mime_type": "application/json",
+                    "candidate_count": 5,
+                },
                 "text": text,
             }
             return text, raw
@@ -235,6 +241,7 @@ def generate_candidates_json(
     fewshot_used: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     prompt = _build_prompt(input_text=input_text, fewshot_used=fewshot_used)
+    prompt_hash = "sha256:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
     last_err: Exception | None = None
     last_raw: dict[str, Any] | None = None
@@ -247,7 +254,14 @@ def generate_candidates_json(
             obj = json.loads(text)
             if not isinstance(obj, dict) or "candidates" not in obj:
                 raise ValueError("JSON missing 'candidates'")
-            return obj, (last_raw or {})
+            enriched = dict(last_raw or {})
+            enriched.setdefault("prompt_hash", prompt_hash)
+            # Ensure candidate_count is always available.
+            if isinstance(enriched.get("params"), dict):
+                enriched["params"].setdefault("candidate_count", 5)
+            else:
+                enriched["params"] = {"candidate_count": 5}
+            return obj, enriched
         except (json.JSONDecodeError, ValueError) as e:
             last_err = e
             # Try again (up to 2 retries)

@@ -520,6 +520,30 @@ def _load_pending(data_dir: Path) -> Dict[str, Any]:
     return read_json(_pending_path(data_dir)) or {"items": []}
 
 
+def _chat_log_path(data_dir: Path) -> Path:
+    return data_dir / "logs" / "chat.jsonl"
+
+
+def _append_chat_log(*, data_dir: Path, run_id: str, role: str, text: str, source: str, meta: Optional[Dict[str, Any]] = None) -> None:
+    try:
+        t = (text or "").strip()
+        if not t:
+            return
+        writer = JsonlWriter(_chat_log_path(data_dir))
+        writer.append(
+            {
+                "ts": utc_iso(),
+                "run_id": run_id,
+                "role": role,
+                "source": source,
+                "text": t,
+                "meta": meta or {},
+            }
+        )
+    except Exception:
+        pass
+
+
 def _save_pending(data_dir: Path, obj: Any) -> None:
     write_json(_pending_path(data_dir), obj)
 
@@ -1984,6 +2008,7 @@ def _handle_event(event: EventIn) -> Dict[str, Any]:
             event.vlm_summary = cached
 
     run_id = _now_id()
+    _append_chat_log(data_dir=data_dir, run_id=run_id, role="user", text=event.text, source=event.source)
     writer.append(
         {
             "ts": utc_iso(),
@@ -2067,6 +2092,19 @@ def _handle_event(event: EventIn) -> Dict[str, Any]:
             "pii": {"contains_pii": False, "redacted": True},
         }
     )
+
+    # Log assistant candidate (pending) to chat log as well.
+    try:
+        _append_chat_log(
+            data_dir=data_dir,
+            run_id=pending_id,
+            role="assistant",
+            text=(candidate.speech_text or candidate.overlay_text or "").strip(),
+            source="llm",
+            meta={"status": "pending", "provider": llm_provider},
+        )
+    except Exception:
+        pass
 
     return {"ok": True, "pending_id": pending_id, "candidate": candidate.model_dump(mode="json")}
 
@@ -2295,6 +2333,9 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
             data_dir2 = settings.data_dir
             st_path = _state_path(data_dir2)
 
+            # Full chat log (user)
+            _append_chat_log(data_dir=data_dir2, run_id=request_id, role="user", text=event.text, source="web")
+
             # Initialize state quickly so UI can start polling
             state = {
                 "updated_at": utc_iso(),
@@ -2332,6 +2373,16 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                 st_now["tts_version"] = None
                 st_now["updated_at"] = utc_iso()
                 write_json(st_path, st_now)
+
+                # Full chat log (assistant)
+                _append_chat_log(
+                    data_dir=data_dir2,
+                    run_id=request_id,
+                    role="assistant",
+                    text=full_text,
+                    source="llm",
+                    meta={"provider": llm_provider},
+                )
 
                 # Sentence-level TTS (web flow)
                 audio_root = settings.data_dir / "audio" / "segments" / request_id
@@ -2436,16 +2487,15 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                     payload={"provider": llm_provider},
                 )
 
-                # Store short-term turn only after full response is fixed
+                # Always store conversation log for Console's "Short-Term Turns" table.
                 try:
-                    if settings.short_term_enabled:
-                        turns_store = TurnsStore(db_path=_turns_db_path(settings))
-                        turns_store.add_turn(
-                            user_text=event.text,
-                            assistant_text=(full_text or "").strip() or "(empty)",
-                            created_at=utc_iso(),
-                            max_keep=settings.short_term_max_events,
-                        )
+                    turns_store = TurnsStore(db_path=_turns_db_path(settings))
+                    turns_store.add_turn(
+                        user_text=event.text,
+                        assistant_text=(full_text or "").strip() or "(empty)",
+                        created_at=utc_iso(),
+                        max_keep=settings.short_term_max_events,
+                    )
                 except Exception:
                     pass
 

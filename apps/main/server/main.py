@@ -36,6 +36,7 @@ from apps.main.vlm.summarizer import VLMSummarizer
 from apps.main.llm.gemini_mvp import GeminiMVP
 from apps.main.llm.openai_chat import OpenAIChatMVP
 from apps.main.stt.openai_service import transcribe_audio_via_openai
+from apps.main.stt.google_service import GoogleSTTConfig, transcribe_wav_via_google
 from apps.main.stt.whisper_service import WhisperConfig, transcribe_pcm, get_model
 
 
@@ -931,7 +932,7 @@ def _startup() -> None:
         import os
 
         provider = (os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
-        if settings.stt_enabled and provider != "openai":
+        if settings.stt_enabled and provider in ("local", "whisper", "faster-whisper"):
             model_name = _normalize_whisper_model_name(
                 os.getenv("AITUBER_WHISPER_MODEL") or settings.whisper_model
             )
@@ -2555,7 +2556,7 @@ async def stt_audio(
     import os
 
     provider = (stt_provider or os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
-    provider_label = "openai" if provider == "openai" else "whisper"
+    provider_label = "google" if provider == "google" else ("openai" if provider == "openai" else "whisper")
     language = (lang or "ja-JP").split("-")[0].lower() or "ja"
 
     force_vlm = _parse_bool_flag(vlm_force, default=False)
@@ -2586,7 +2587,22 @@ async def stt_audio(
     chunk_count = 0
     chunk_sec = 0.0
     stt_start = time.perf_counter()
-    if provider == "openai":
+    if provider == "google":
+        chunk_count = 1
+        try:
+            text = await asyncio.to_thread(
+                transcribe_wav_via_google,
+                audio_bytes=audio_bytes,
+                cfg=GoogleSTTConfig(language_code=(lang or "ja-JP")),
+            )
+        except ModuleNotFoundError:
+            return STTAudioOut(ok=False, text="", error="missing_dep:google-cloud-speech").model_dump(mode="json")
+        except ValueError as e:
+            return STTAudioOut(ok=False, text="", error=str(e)[:200]).model_dump(mode="json")
+        except Exception as e:
+            return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
+
+    elif provider == "openai":
         model_name = (os.getenv("AITUBER_OPENAI_WHISPER_MODEL") or settings.openai_whisper_model or "whisper-1").strip() or "whisper-1"
         chunk_count = 1
         try:
@@ -2712,14 +2728,30 @@ async def stt_audio(
 
 @app.post("/stt/warmup")
 def stt_warmup() -> Dict[str, Any]:
-    """Preload Whisper model so first STT is fast."""
+    """Warm up STT provider.
+
+    - google: instantiate Speech client (credential check)
+    - openai: report model
+    - local/whisper: preload faster-whisper model
+    """
     import os
 
     settings = load_settings()
     provider = (os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
+    if provider == "google":
+        try:
+            from google.cloud import speech
+
+            _ = speech.SpeechClient()
+            return {"ok": True, "provider": "google"}
+        except Exception as e:
+            return {"ok": False, "provider": "google", "error": f"{type(e).__name__}: {e}"[:200]}
     if provider == "openai":
         model_name = (os.getenv("AITUBER_OPENAI_WHISPER_MODEL") or settings.openai_whisper_model or "whisper-1").strip() or "whisper-1"
         return {"ok": True, "provider": "openai", "model": model_name}
+
+    if provider not in ("local", "whisper", "faster-whisper"):
+        return {"ok": False, "provider": provider, "error": "unknown_provider"}
 
     model_name = _normalize_whisper_model_name(
         os.getenv("AITUBER_WHISPER_MODEL") or settings.whisper_model

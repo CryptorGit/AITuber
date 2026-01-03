@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4o-mini")
 
     # STT
-    stt_provider: str = Field(default="local")
+    stt_provider: str = Field(default="google")
     stt_enabled: bool = Field(default=True)
     whisper_model: str = Field(default="large-v3-turbo")
     whisper_compute_type: str = Field(default="int8")
@@ -110,6 +110,7 @@ def load_settings(*, env_file: Optional[Path] = None) -> Settings:
     # Hard-lock providers regardless of env/console settings.
     os.environ["AITUBER_LLM_PROVIDER"] = "gemini"
     os.environ["AITUBER_TTS_PROVIDER"] = "google"
+    os.environ["AITUBER_STT_PROVIDER"] = "google"
 
     # Resolve GOOGLE_APPLICATION_CREDENTIALS from .env/ folder if not set.
     try:

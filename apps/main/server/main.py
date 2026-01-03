@@ -2323,6 +2323,11 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                 st_now = read_json(st_path) or {}
                 st_now["speech_text"] = full_text
                 st_now["overlay_text"] = overlay_text
+                # Reset per-run queue so the UI represents the current utterance's segments.
+                st_now["tts_queue"] = []
+                st_now["tts_queue_version"] = int(time.time() * 1000)
+                st_now["tts_path"] = ""
+                st_now["tts_version"] = None
                 st_now["updated_at"] = utc_iso()
                 write_json(st_path, st_now)
 

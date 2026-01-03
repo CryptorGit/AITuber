@@ -116,6 +116,12 @@
     if (el.sttText) el.sttText.value = '';
   }
 
+  function setSttText(text) {
+    const t = String(text || '').trim();
+    sttBuffer = t;
+    if (el.sttText) el.sttText.value = t;
+  }
+
   function appendSttText(part) {
     const t = String(part || '').trim();
     if (!t) return;
@@ -185,8 +191,9 @@
       const form = new FormData();
       form.append('lang', 'ja-JP');
       form.append('file', wav, 'mic.wav');
-      const vadOn = el.vadEnabled && el.vadEnabled.checked ? '1' : '0';
-      const vadThr = el.vadThreshold ? String(el.vadThreshold.value || '0.01') : '0.01';
+      // For google non-stream mode, avoid aggressive VAD (it tends to cut on breaths/pauses).
+      const vadOn = isGoogleStt() ? '0' : (el.vadEnabled && el.vadEnabled.checked ? '1' : '0');
+      const vadThr = el.vadThreshold ? String(el.vadThreshold.value || '0.005') : '0.005';
       form.append('vad_enabled', vadOn);
       form.append('vad_threshold', vadThr);
       form.append('stt_provider', getSttProvider());
@@ -203,9 +210,8 @@
         return;
       }
 
-      // Replace previous recognition (requested behavior for streaming).
-      resetSttBuffer();
-      appendSttText(text);
+      // Always overwrite previous recognition.
+      setSttText(text);
       if (el.speechStatus) el.speechStatus.textContent = `STT: ${text}`;
       await submitText(text, { vlmSummary });
     } catch (e) {
@@ -434,7 +440,7 @@
     const vadEnabled = localStorage.getItem('aituber.stt.vadEnabled');
     if (el.vadEnabled) el.vadEnabled.checked = vadEnabled !== '0';
     if (el.vadThreshold) {
-      el.vadThreshold.value = localStorage.getItem('aituber.stt.vadThreshold') || '0.01';
+      el.vadThreshold.value = localStorage.getItem('aituber.stt.vadThreshold') || '0.005';
     }
     if (el.vlmEnabled) {
       el.vlmEnabled.checked = localStorage.getItem('aituber.vlm.enabled') === '1';
@@ -464,7 +470,7 @@
       localStorage.setItem('aituber.stt.vadEnabled', el.vadEnabled.checked ? '1' : '0');
     }
     if (el.vadThreshold) {
-      localStorage.setItem('aituber.stt.vadThreshold', String(el.vadThreshold.value || '0.01'));
+      localStorage.setItem('aituber.stt.vadThreshold', String(el.vadThreshold.value || '0.005'));
     }
     if (el.sttProvider) {
       localStorage.setItem('aituber.provider.stt', String(el.sttProvider.value || 'local'));
@@ -726,6 +732,7 @@
       el.speechStatus.textContent = 'STT: no audio track (check mic permission/selection).';
       return;
     }
+    // Clear previous recognition immediately when starting.
     resetSttBuffer();
 
     // WebAudio PCM capture -> WAV (no ffmpeg required)

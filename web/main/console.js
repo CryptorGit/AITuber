@@ -124,6 +124,116 @@
     if (el.sttText) el.sttText.value = sttBuffer;
   }
 
+  function isGoogleStt() {
+    return String(getSttProvider() || '').trim().toLowerCase() === 'google';
+  }
+
+  function encodeWavFloat32Mono(chunks, sampleRate) {
+    let length = 0;
+    for (const c of chunks) length += c.length;
+    const pcm = new Float32Array(length);
+    let offset = 0;
+    for (const c of chunks) {
+      pcm.set(c, offset);
+      offset += c.length;
+    }
+
+    const bytesPerSample = 2;
+    const blockAlign = 1 * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = pcm.length * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    function writeStr(off, s) {
+      for (let i = 0; i < s.length; i += 1) view.setUint8(off + i, s.charCodeAt(i));
+    }
+
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true); // bits
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let p = 44;
+    for (let i = 0; i < pcm.length; i += 1) {
+      let s = pcm[i];
+      if (s > 1) s = 1;
+      if (s < -1) s = -1;
+      const v = s < 0 ? s * 0x8000 : s * 0x7fff;
+      view.setInt16(p, v, true);
+      p += 2;
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  async function postSttWavAndSubmit(wav) {
+    if (!wav || wav.size < 4000) return;
+    if (sttBusy) return;
+    sttBusy = true;
+    try {
+      if (el.speechStatus) el.speechStatus.textContent = 'STT: sending audio...';
+      const form = new FormData();
+      form.append('lang', 'ja-JP');
+      form.append('file', wav, 'mic.wav');
+      const vadOn = el.vadEnabled && el.vadEnabled.checked ? '1' : '0';
+      const vadThr = el.vadThreshold ? String(el.vadThreshold.value || '0.01') : '0.01';
+      form.append('vad_enabled', vadOn);
+      form.append('vad_threshold', vadThr);
+      form.append('stt_provider', getSttProvider());
+      form.append('stt_enabled', el.sttEnabled && el.sttEnabled.checked ? '1' : '0');
+      const vlmForce = el.vlmEnabled && el.vlmEnabled.checked ? '1' : '0';
+      form.append('vlm_force', vlmForce);
+
+      sttAbortController = new AbortController();
+      const j = await formPost('/stt/audio', form, { signal: sttAbortController.signal });
+      const text = j && j.ok ? String(j.text || '').trim() : '';
+      const vlmSummary = j && j.vlm_summary ? String(j.vlm_summary || '').trim() : '';
+      if (!text) {
+        if (el.speechStatus) el.speechStatus.textContent = `STT: ${(j && j.error) || 'no_transcript'}`;
+        return;
+      }
+
+      // Replace previous recognition (requested behavior for streaming).
+      resetSttBuffer();
+      appendSttText(text);
+      if (el.speechStatus) el.speechStatus.textContent = `STT: ${text}`;
+      await submitText(text, { vlmSummary });
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        if (el.speechStatus) el.speechStatus.textContent = 'STT: canceled.';
+        return;
+      }
+      if (el.speechStatus) el.speechStatus.textContent = `STT error: ${e && e.message ? e.message : e}`;
+    } finally {
+      sttBusy = false;
+      sttAbortController = null;
+    }
+  }
+
+  async function stopRecorderAndMaybeSendFinal() {
+    // Google STT: non-streaming (send once at the end).
+    if (isGoogleStt() && pcmChunks && pcmChunks.length) {
+      const chunks = pcmChunks;
+      pcmChunks = [];
+      const sr = pcmSampleRate;
+      const wav = encodeWavFloat32Mono(chunks, sr);
+      stopRecorder();
+      await postSttWavAndSubmit(wav);
+      return;
+    }
+    stopRecorder();
+  }
+
   const PROVIDER_PRESETS = {
     local: { stt: 'local', llm: 'gemini', tts: 'google' },
     google: { stt: 'google', llm: 'gemini', tts: 'google' },
@@ -648,105 +758,29 @@
     audioProcessor.connect(gain);
     gain.connect(audioCtx.destination);
 
-    function encodeWavFloat32Mono(chunks, sampleRate) {
-      let length = 0;
-      for (const c of chunks) length += c.length;
-      const pcm = new Float32Array(length);
-      let offset = 0;
-      for (const c of chunks) {
-        pcm.set(c, offset);
-        offset += c.length;
-      }
-
-      const bytesPerSample = 2;
-      const blockAlign = 1 * bytesPerSample;
-      const byteRate = sampleRate * blockAlign;
-      const dataSize = pcm.length * bytesPerSample;
-      const buffer = new ArrayBuffer(44 + dataSize);
-      const view = new DataView(buffer);
-
-      function writeStr(off, s) {
-        for (let i = 0; i < s.length; i += 1) view.setUint8(off + i, s.charCodeAt(i));
-      }
-
-      writeStr(0, 'RIFF');
-      view.setUint32(4, 36 + dataSize, true);
-      writeStr(8, 'WAVE');
-      writeStr(12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true); // PCM
-      view.setUint16(22, 1, true); // mono
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, byteRate, true);
-      view.setUint16(32, blockAlign, true);
-      view.setUint16(34, 16, true); // bits
-      writeStr(36, 'data');
-      view.setUint32(40, dataSize, true);
-
-      let p = 44;
-      for (let i = 0; i < pcm.length; i += 1) {
-        let s = pcm[i];
-        if (s > 1) s = 1;
-        if (s < -1) s = -1;
-        const v = s < 0 ? s * 0x8000 : s * 0x7fff;
-        view.setInt16(p, v, true);
-        p += 2;
-      }
-
-      return new Blob([buffer], { type: 'audio/wav' });
-    }
-
     async function flushChunk() {
       if (!el.sttEnabled || !el.sttEnabled.checked) return;
       if (sttBusy) return;
       if (!pcmChunks.length) return;
 
+      // google: do not stream; send once when recording stops.
+      if (isGoogleStt()) return;
+
       // Take snapshot and clear
       const chunks = pcmChunks;
       pcmChunks = [];
       const wav = encodeWavFloat32Mono(chunks, pcmSampleRate);
-      if (!wav || wav.size < 4000) return;
-
-      sttBusy = true;
-      try {
-        el.speechStatus.textContent = 'STT: sending audio...';
-        const form = new FormData();
-        form.append('lang', 'ja-JP');
-        form.append('file', wav, 'mic.wav');
-        const vadOn = el.vadEnabled && el.vadEnabled.checked ? '1' : '0';
-        const vadThr = el.vadThreshold ? String(el.vadThreshold.value || '0.01') : '0.01';
-        form.append('vad_enabled', vadOn);
-        form.append('vad_threshold', vadThr);
-        form.append('stt_provider', getSttProvider());
-        form.append('stt_enabled', el.sttEnabled && el.sttEnabled.checked ? '1' : '0');
-        const vlmForce = el.vlmEnabled && el.vlmEnabled.checked ? '1' : '0';
-        form.append('vlm_force', vlmForce);
-        sttAbortController = new AbortController();
-        const j = await formPost('/stt/audio', form, { signal: sttAbortController.signal });
-        const text = j && j.ok ? String(j.text || '').trim() : '';
-        const vlmSummary = j && j.vlm_summary ? String(j.vlm_summary || '').trim() : '';
-        if (!text) {
-          el.speechStatus.textContent = `STT: ${(j && j.error) || 'no_transcript'}`;
-          return;
-        }
-        appendSttText(text);
-        el.speechStatus.textContent = `STT: ${text}`;
-        await submitText(text, { vlmSummary });
-      } catch (e) {
-        if (e && e.name === 'AbortError') {
-          el.speechStatus.textContent = 'STT: canceled.';
-          return;
-        }
-        el.speechStatus.textContent = `STT error: ${e && e.message ? e.message : e}`;
-      } finally {
-        sttBusy = false;
-        sttAbortController = null;
-      }
+      await postSttWavAndSubmit(wav);
     }
 
-    // Send chunk every ~0.8s
-    sttTimer = setInterval(flushChunk, 800);
-    el.speechStatus.textContent = 'STT: recording started.';
+    // Send chunk every ~0.8s (except google: non-stream)
+    if (isGoogleStt()) {
+      sttTimer = null;
+      el.speechStatus.textContent = 'STT: recording started (google, non-stream).';
+    } else {
+      sttTimer = setInterval(flushChunk, 800);
+      el.speechStatus.textContent = 'STT: recording started (streaming).';
+    }
   }
 
   async function loadHotkeysAndRenderSelect() {
@@ -1339,7 +1373,7 @@
           stopRecorder();
           startRecorder();
         } else {
-          stopRecorder();
+          void stopRecorderAndMaybeSendFinal();
           if (el.speechStatus) el.speechStatus.textContent = 'STT stopped.';
         }
       };

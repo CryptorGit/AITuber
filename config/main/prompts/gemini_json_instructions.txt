@@ -1,0 +1,15 @@
+次の入力と文脈から、必ずJSONのみを出力してください（前後に説明文を付けない）。
+
+# 出力JSONスキーマ
+{
+  "speech_text": "TTSに読む本文（短め）",
+  "overlay_text": "OBSに出す字幕/要点（さらに短め）",
+  "emotion": "neutral|happy|angry|sad|excited|confused",
+  "motion_tags": ["greet","laugh","think","nod","smile","neutral"],
+  "safety": {"needs_manager_approval": true, "notes": "理由"}
+}
+
+制約:
+- speech_textは400文字以内
+- overlay_textは120文字以内
+- 個人情報になり得る内容は書かない

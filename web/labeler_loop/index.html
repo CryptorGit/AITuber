@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>labeler_loop</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1 class="title">labeler_loop</h1>
+        <div id="status" class="status">次ターン準備完了</div>
+      </header>
+
+      <section class="panel">
+        <div class="row">
+          <button id="btnStart" class="btn primary">録音開始</button>
+          <button id="btnStop" class="btn" disabled>録音停止</button>
+          <button id="btnSend" class="btn" disabled>送信</button>
+        </div>
+        <div class="hint">Space: 録音開始/停止 | Enter: 送信</div>
+        <div id="error" class="error" hidden></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="subtitle">STT（編集可）</h2>
+        <textarea id="sttText" rows="4" placeholder="録音停止後にここへ表示されます"></textarea>
+      </section>
+
+      <section class="panel">
+        <h2 class="subtitle">候補（5つ）</h2>
+        <div id="candidates" class="candidates"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="subtitle">理由タグ（任意）</h2>
+        <input id="reasonTags" class="input" placeholder="metaphor_good, tempo_good" />
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,45 @@
+### Runtime data (do not commit)
+/data/
+
+### Local-only config (do not commit)
+/.env/
+/configs/
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+# --- Python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+ENV/
+.env
+
+### Logs / runtime artifacts (legacy)
+/logs/
+*.log
+
+# MMF IPC artifacts
+*.mmf
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+
+### Third-party SDKs / large assets (do not commit)
+/tools/
+
+### Live2D web assets (licensed / user-provided)
+/web/main/vendor/live2dcubismcore*.js
+/web/main/models/
+
+### Local test artifacts
+/tests/image_test.jpg

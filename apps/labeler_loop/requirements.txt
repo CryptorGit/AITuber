@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+pydantic>=2.6
+
+# Google Cloud STT
+google-cloud-speech>=2.26
+protobuf>=4.25
+
+# Gemini (prefer modern SDK; we also support fallback to google-generativeai)
+google-genai>=0.6

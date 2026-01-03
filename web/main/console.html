@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AITuber Settings</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        margin: 16px;
+      }
+      .row {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .card {
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        padding: 12px;
+        min-width: 320px;
+        flex: 1;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: #444;
+        margin-top: 8px;
+      }
+      select,
+      input,
+      textarea,
+      button {
+        width: 100%;
+        padding: 8px;
+        font-size: 14px;
+        margin-top: 4px;
+        box-sizing: border-box;
+      }
+      textarea {
+        height: 80px;
+      }
+      video {
+        width: 100%;
+        max-height: 240px;
+        background: #111;
+      }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #eee;
+        font-size: 12px;
+        margin-right: 6px;
+      }
+      .pendingItem {
+        border-top: 1px solid #eee;
+        padding: 10px 0;
+      }
+      .pendingActions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .muted {
+        color: #666;
+        font-size: 12px;
+      }
+      .tableWrap {
+        border: 1px solid #eee;
+        border-radius: 8px;
+        max-height: 260px;
+        overflow: auto;
+        margin-top: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th,
+      td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #eee;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        position: sticky;
+        top: 0;
+        background: #fafafa;
+        z-index: 1;
+      }
+      .btn-inline {
+        width: auto;
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>AITuber Settings</h1>
+    <p class="muted">
+      このページはローカル実行前提です。ブラウザはカメラ/マイクの選択と、画像/テキストをサーバへ送るだけで、APIキーは保持しません。
+    </p>
+
+    <div style="display:flex; gap:8px; align-items:center; margin: 10px 0 18px">
+      <button id="saveAllSettings" type="button" style="width:auto">Save all settings</button>
+      <div class="muted" id="saveAllStatus"></div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h2>デバイス / モデル</h2>
+
+        <label>カメラ</label>
+        <select id="cameraSelect"></select>
+
+        <label>マイク</label>
+        <select id="micSelect"></select>
+
+        <label>STT モード（トグル）</label>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="sttEnabled" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">ONで 選択マイクを録音 → /stt/audio → /events</div>
+        </div>
+
+        <label>Live2D モデル選択（/web/models 配下）</label>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:6px">
+          <button id="browseModelFolder" type="button">フォルダ参照…</button>
+          <input
+            id="modelFolderPicker"
+            type="file"
+            webkitdirectory
+            directory
+            multiple
+            style="display:none"
+          />
+          <button id="refreshModels" type="button">一覧更新</button>
+        </div>
+
+        <label>モデル一覧（.model3.json）</label>
+        <select id="modelSelect"></select>
+
+        <label>選択中のモデルPATH</label>
+        <input id="modelPath" readonly />
+
+        <label>Stage 背景色</label>
+        <input id="stageBg" type="color" />
+
+        <label>字幕フォント（Stage）</label>
+        <select id="overlayFont">
+          <option value="system-ui">system-ui</option>
+          <option value="'Segoe UI'">Segoe UI</option>
+          <option value="Meiryo">Meiryo</option>
+          <option value="'Yu Gothic'">Yu Gothic</option>
+          <option value="'MS Gothic'">MS Gothic</option>
+          <option value="monospace">monospace</option>
+        </select>
+
+        <label>Stage マウス入力</label>
+        <select id="mouseMode">
+          <option value="no_follow">no_follow（ドラッグのみ）</option>
+          <option value="no_input">no_input（完全無視）</option>
+        </select>
+
+        <button id="applyModel" type="button">モデルを保存（配信用ページに反映）</button>
+
+        <h3>カメラプレビュー</h3>
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="frameCanvas" style="display:none"></canvas>
+
+        <div style="margin-top: 8px" class="muted" id="vlmStatus"></div>
+      </div>
+
+      <div class="card">
+        <h2>Providers</h2>
+        <label>Preset</label>
+        <select id="providerPreset">
+          <option value="">(manual)</option>
+          <option value="local">local (whisper + gemini + google)</option>
+        </select>
+        <div class="muted">Applies to /stt/audio and /web/submit only.</div>
+
+        <label style="margin-top:12px">STT provider</label>
+        <select id="sttProvider">
+          <option value="local">local (faster-whisper)</option>
+          <option value="openai">openai</option>
+        </select>
+
+        <label style="margin-top:12px">LLM provider</label>
+        <select id="llmProvider" disabled>
+          <option value="gemini">gemini</option>
+        </select>
+
+        <label style="margin-top:12px">TTS provider</label>
+        <select id="ttsProvider" disabled>
+          <option value="google">google</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <h2>入力 / 出力</h2>
+        <label>入力（保持しません）</label>
+        <textarea id="manualText" placeholder="ここに入力 → 送信"></textarea>
+        <button id="sendManual">送信（カメラ→VLM, 入力→LLM）</button>
+
+        <h3>STT</h3>
+        <label>VAD</label>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="vadEnabled" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">無音判定を有効</div>
+        </div>
+        <label>VAD threshold</label>
+        <input id="vadThreshold" type="number" min="0" max="0.2" step="0.005" />
+        <div class="muted">例: 0.01〜0.02（無音での誤爆を抑制）</div>
+        <div class="muted" id="speechStatus"></div>
+
+        <label>STT streaming</label>
+        <textarea id="sttText" readonly></textarea>
+
+        <label>VLM</label>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="vlmEnabled" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">Use VLM summary when available</div>
+        </div>
+
+        <h3>LLM 出力</h3>
+        <div class="muted">候補一覧は表示しません。出力をそのまま表示します。</div>
+        <div style="margin-top:10px">
+          <div><b>overlay</b></div>
+          <div id="outOverlay" style="white-space:pre-wrap"></div>
+        </div>
+        <div style="margin-top:10px">
+          <div><b>speech</b></div>
+          <div id="outSpeech" style="white-space:pre-wrap"></div>
+        </div>
+        <div class="muted" style="margin-top:10px" id="outMeta"></div>
+      </div>
+
+      <div class="card">
+        <h2>モーション</h2>
+        <div class="muted">hotkeys.json のキーを選択して送信します（あとでAPI化）。</div>
+        <label>ホットキー</label>
+        <select id="motionSelect"></select>
+        <button id="motionSend">選択したモーションを送信</button>
+        <div class="muted" id="motionStatus" style="margin-top:8px"></div>
+      </div>
+
+      <div class="card">
+        <h2>RAG</h2>
+        <label>RAG enabled</label>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="ragEnabled" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">When OFF, no RAG context is sent.</div>
+        </div>
+
+        <label style="margin-top:12px">Short-Term Turns enabled</label>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="shortTermEnabled" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">Auto store completed turns and optionally include in prompt.</div>
+        </div>
+
+        <label style="margin-top:12px">short_term_max_events (DB retention)</label>
+        <input id="shortTermMaxEvents" type="number" min="0" max="200" step="1" />
+        <div class="muted">Max records kept in DB for Short-Term Turns.</div>
+
+        <label style="margin-top:12px">short_term_turns_to_prompt</label>
+        <input id="shortTermTurnsToPrompt" type="number" min="0" max="100" step="1" />
+        <div class="muted">How many recent turns to include in LLM prompt (separate from retention).</div>
+
+        <div style="display:flex; gap:8px; margin-top:8px">
+          <button id="ragReload" type="button">Reload tables</button>
+        </div>
+        <div class="muted" id="ragStatus" style="margin-top:6px"></div>
+
+        <h3>RAG items (manual knowledge DB)</h3>
+        <div class="muted">Short RAG / Long RAG are editable records (not conversation log).</div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px">
+          <select id="ragItemType" style="width:auto">
+            <option value="short">short</option>
+            <option value="long">long</option>
+          </select>
+          <input id="ragItemTitle" placeholder="title (optional)" style="min-width:220px; flex:1" />
+        </div>
+        <textarea id="ragItemText" placeholder="text" style="height:90px"></textarea>
+        <button id="ragItemAdd" type="button">Add RAG item</button>
+
+        <h3 style="margin-top:12px">Short RAG</h3>
+        <div class="tableWrap">
+          <table id="ragTable">
+            <thead>
+              <tr>
+                <th>id</th>
+                <th>title</th>
+                <th>created</th>
+                <th>preview</th>
+                <th>actions</th>
+              </tr>
+            </thead>
+            <tbody id="ragShortTableBody"></tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top:12px">Long RAG</h3>
+        <div class="tableWrap">
+          <table id="ragLongTable">
+            <thead>
+              <tr>
+                <th>id</th>
+                <th>title</th>
+                <th>created</th>
+                <th>preview</th>
+                <th>actions</th>
+              </tr>
+            </thead>
+            <tbody id="ragLongTableBody"></tbody>
+          </table>
+        </div>
+
+        <h3 style="margin-top:12px">Short-Term Turns (conversation log)</h3>
+        <div style="display:flex; gap:8px; margin-top:8px">
+          <button id="turnsReload" type="button" class="btn-inline">Reload turns</button>
+          <button id="turnsClear" type="button" class="btn-inline">Clear turns</button>
+        </div>
+        <div class="tableWrap">
+          <table id="turnsTable">
+            <thead>
+              <tr>
+                <th>id</th>
+                <th>created</th>
+                <th>user</th>
+                <th>assistant</th>
+                <th>actions</th>
+              </tr>
+            </thead>
+            <tbody id="turnsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Prompts / Params</h2>
+        <label>LLM system prompt</label>
+        <textarea id="llmSystemPrompt" placeholder="LLM 用 system prompt"></textarea>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:240px; flex:1">
+            <label>LLM model</label>
+            <input id="llmModel" placeholder="gemini-2.0-flash-lite" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>LLM temperature</label>
+            <input id="llmTemp" type="number" step="0.1" min="0" max="2" />
+          </div>
+          <div style="min-width:200px; flex:1">
+            <label>LLM max_output_tokens</label>
+            <input id="llmMaxTokens" type="number" step="1" min="64" max="8192" />
+          </div>
+        </div>
+        <button id="llmSave">LLM 設定を保存</button>
+        <div class="muted" id="llmStatus" style="margin-top:8px"></div>
+
+        <label style="margin-top:12px">VLM system prompt</label>
+        <textarea id="vlmSystemPrompt" placeholder="VLM 用 system prompt"></textarea>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:240px; flex:1">
+            <label>VLM model</label>
+            <input id="vlmModel" placeholder="gemini-2.0-flash-lite" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>VLM temperature</label>
+            <input id="vlmTemp" type="number" step="0.1" min="0" max="2" />
+          </div>
+          <div style="min-width:200px; flex:1">
+            <label>VLM max_output_tokens</label>
+            <input id="vlmMaxTokens" type="number" step="1" min="32" max="2048" />
+          </div>
+        </div>
+        <button id="vlmSave">VLM 設定を保存</button>
+        <div class="muted" id="vlmPromptStatus" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <script src="console.js"></script>
+  </body>
+</html>

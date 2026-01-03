@@ -1,0 +1,11 @@
+# Map motion_tags -> VTube Studio hotkey IDs
+# You must fill these IDs from VTube Studio (Hotkey list) for your setup.
+# If empty, the system will log and skip triggering.
+
+hotkeys:
+  greet: ""
+  laugh: ""
+  think: ""
+  nod: ""
+  smile: ""
+  neutral: ""

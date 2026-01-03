@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AITuber Stage</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        overflow: hidden;
+      }
+      #root {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        background: #000;
+      }
+      #l2dCanvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+      }
+      #overlayText {
+        position: absolute;
+        left: 24px;
+        right: 24px;
+        bottom: 24px;
+        padding: 12px 16px;
+        color: white;
+        font-size: 28px;
+        line-height: 1.25;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+        white-space: pre-wrap;
+        pointer-events: auto;
+        cursor: move;
+        user-select: none;
+      }
+      #status {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.9);
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 6px;
+        max-width: 60vw;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <canvas id="l2dCanvas"></canvas>
+      <div id="overlayText"></div>
+      <div id="status"></div>
+      <audio id="ttsAudio" autoplay></audio>
+    </div>
+
+    <!-- Live2D rendering support (MVP): PIXI + pixi-live2d-display.
+         NOTE: Cubism Core (live2dcubismcore.min.js) must be available.
+         See web/README.md for details. -->
+    <script src="./vendor/live2dcubismcore.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism4.min.js"></script>
+
+    <script src="stage.js"></script>
+  </body>
+</html>

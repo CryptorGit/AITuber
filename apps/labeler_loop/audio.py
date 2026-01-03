@@ -11,10 +11,13 @@ from env_loader import load_env_files
 
 
 def _read_env_value(path: Path, key: str) -> str | None:
-    if not path.exists():
+    if not path.exists() or not path.is_file():
         return None
 
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
     for enc in ("utf-8-sig", "utf-8"):
         try:
             text = raw.decode(enc)

@@ -23,13 +23,37 @@ def transcribe_wav(wav_path: Path) -> tuple[str, dict[str, Any]]:
 
     from google.cloud import speech  # imported lazily
 
+    # Parse WAV and send raw LINEAR16 PCM bytes (do NOT send WAV container bytes).
+    try:
+        import io
+        import wave
+        import numpy as np
+
+        raw_wav = wav_path.read_bytes()
+        with wave.open(io.BytesIO(raw_wav), "rb") as wf:
+            channels = int(wf.getnchannels())
+            sampwidth = int(wf.getsampwidth())
+            sample_rate = int(wf.getframerate())
+            n_frames = int(wf.getnframes())
+            frames = wf.readframes(n_frames)
+
+        if sampwidth != 2:
+            raise RuntimeError(f"unsupported_sampwidth:{sampwidth}")
+
+        audio_i16 = np.frombuffer(frames, dtype=np.int16)
+        if channels > 1:
+            audio_i16 = audio_i16.reshape(-1, channels).mean(axis=1).astype(np.int16)
+        pcm_bytes = audio_i16.tobytes()
+    except Exception as e:
+        raise RuntimeError(f"invalid_wav:{type(e).__name__}") from e
+
     language_code = os.getenv("STT_LANGUAGE_CODE", "ja-JP")
 
     client = speech.SpeechClient()
-    audio = speech.RecognitionAudio(content=wav_path.read_bytes())
+    audio = speech.RecognitionAudio(content=pcm_bytes)
     config = speech.RecognitionConfig(
         encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=16000,
+        sample_rate_hertz=sample_rate,
         language_code=language_code,
         enable_automatic_punctuation=True,
     )

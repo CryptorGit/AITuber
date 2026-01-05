@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -73,13 +73,50 @@ def transcribe_wav(wav_path: Path) -> tuple[str, dict[str, Any]]:
 
 def _build_prompt(input_text: str, fewshot_used: list[dict[str, Any]]) -> str:
     lines: list[str] = []
-    lines.append("あなたは日本語の会話用アシスタント。ユーザーの発話に対し、返答候補を5つ作る。")
+    lines.append("あなたは日本語の会話用コメント生成。ユーザー発話に対して、返答候補を5つ作る。")
     lines.append("重要: 出力はJSONのみ。説明文やコードフェンスは禁止。")
-    lines.append("重要: 以下の制約を必ず守る:")
-    lines.append("- 例と同じ言い回しをそのままコピーしない")
-    lines.append("- 固有名詞は変える（同一人物/団体/作品名に依存しない）")
-    lines.append("- 各候補は2〜4連撃（2〜4文）で、最後は短い巻き取りで終える")
-    lines.append("- 口調は自然で、テンポ良く")
+    lines.append("重要: 候補は『言い換え5種』ではなく、目的(mode)が固定の5本。modeの重複は禁止。")
+    lines.append("重要: ユーモアはmodeではなくstyle（味付け）として付与する。")
+    lines.append("重要: 各候補は2〜4文。最後の1文は必ず短い『巻き取り』(次の行動へ促す)で終える。")
+    lines.append("重要: 受付botっぽい定型文は禁止（例: 承知しました/お待ちしております/確認できました/他に何かありますか？など）")
+    lines.append("重要: 正論・丁寧すぎる共感で締めるのは禁止（面白さが死ぬため）")
+    lines.append("重要: 個人攻撃/差別/露骨な性的含みは禁止")
+    lines.append("重要: 同一入力でも必ず多様になるよう、modeごとに出力の役割を分担せよ。")
+
+    # Fixed modes (MUST output exactly once each, in this order)
+    modes = [
+        (
+            "NETWORK",
+            "仲間/連帯の支援。『一緒感』『内輪感』『ツッコミ待ち』を作る。styleでcomedic_tease等を載せやすい。",
+            "comedic_tease",
+        ),
+        (
+            "EMOTIONAL",
+            "共感/寄り添い/安心/励まし。感情を受け止める（ただし丁寧すぎる締めは避け、最後は短く巻き取る）。",
+            "warm",
+        ),
+        (
+            "ESTEEM",
+            "承認/褒め/肯定/鼓舞。自己効力感を上げる（いじり褒め等はstyleで表現）。",
+            "hype",
+        ),
+        (
+            "INFORMATIONAL",
+            "情報/助言/手順。次の一手を具体化する（説教ではなく相棒感）。",
+            "practical",
+        ),
+        (
+            "TANGIBLE",
+            "具体的/実務的支援。『今これやろ』『こう手配しよう』など、行動・手伝い・リソース提案。",
+            "actionable",
+        ),
+    ]
+    lines.append("\nmode定義（必ずこの5本、順番も固定。mode重複禁止）:")
+    for m, d, example_style in modes:
+        lines.append(f"- {m}: {d} (style例: {example_style})")
+
+    lines.append("\nstyle定義（modeとは独立した味付け。各候補に付けること。例: comedic_tease / warm / hype / practical / actionable）")
+    lines.append("重要: 同じ比喩/同じオチ/同じ締めの巻き取りを5候補で共有しない。似たら作り直す。")
 
     if fewshot_used:
         lines.append("\n参考例（真似しすぎ禁止、構造だけ参考）:")
@@ -95,11 +132,11 @@ def _build_prompt(input_text: str, fewshot_used: list[dict[str, Any]]) -> str:
 
     schema = {
         "candidates": [
-            {"text": "..."},
-            {"text": "..."},
-            {"text": "..."},
-            {"text": "..."},
-            {"text": "..."},
+            {"mode": "NETWORK", "style": "comedic_tease", "text": "..."},
+            {"mode": "EMOTIONAL", "style": "warm", "text": "..."},
+            {"mode": "ESTEEM", "style": "hype", "text": "..."},
+            {"mode": "INFORMATIONAL", "style": "practical", "text": "..."},
+            {"mode": "TANGIBLE", "style": "actionable", "text": "..."},
         ]
     }
 
@@ -269,5 +306,71 @@ def generate_candidates_json(
         except Exception as e:
             # Non-JSON errors (auth/model/network/etc) should fail fast.
             raise
+
+    raise RuntimeError(f"Model returned invalid JSON after retries: {last_err}")
+
+
+def regenerate_candidates_json(
+    input_text: str,
+    fewshot_used: list[dict[str, Any]],
+    existing_candidates: list[dict[str, Any]],
+    regen_modes: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Regenerate ONLY selected modes.
+
+    Returns JSON: {"candidates": [{"mode": ..., "text": ...}, ...]} for the requested modes.
+    """
+
+    lines: list[str] = []
+    lines.append("あなたは日本語の会話用コメント生成。")
+    lines.append("重要: 出力はJSONのみ。説明文やコードフェンスは禁止。")
+    lines.append("重要: これは部分再生成。指定されたmodeだけを再生成し、被りを強く避ける。")
+    lines.append("重要: 各候補は2〜4文。最後の1文は必ず短い『巻き取り』で終える。")
+    lines.append("重要: 受付botっぽい定型文は禁止。個人攻撃/差別/露骨な性的含みは禁止。")
+
+    # Provide existing candidates to forbid overlaps.
+    lines.append("\nすでに出た候補（この文面/言い回し/オチ/比喩/罰ゲーム/締めの巻き取りまで含め、被り禁止）:")
+    for c in existing_candidates:
+        m = str(c.get("mode") or "")
+        t = str(c.get("text") or "")
+        if not m or not t:
+            continue
+        lines.append(f"- {m}: {t}")
+
+    lines.append("\nユーザー発話:")
+    lines.append(input_text.strip())
+
+    lines.append("\n再生成するmode（このmodeだけ返せ。他のmodeは禁止）:")
+    for m in regen_modes:
+        lines.append(f"- {m}")
+
+    schema = {
+        "candidates": [{"mode": "<one_of_requested_modes>", "text": "..."}],
+    }
+    lines.append("\n必ず次のJSONスキーマに一致するJSONだけを返せ:")
+    lines.append(json.dumps(schema, ensure_ascii=False))
+
+    prompt = "\n".join(lines)
+    prompt_hash = "sha256:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+    last_err: Exception | None = None
+    last_raw: dict[str, Any] | None = None
+    for _attempt in range(3):
+        try:
+            text, raw = _genai_generate(prompt)
+            last_raw = raw
+            obj = json.loads(text)
+            if not isinstance(obj, dict) or "candidates" not in obj:
+                raise ValueError("JSON missing 'candidates'")
+            enriched = dict(last_raw or {})
+            enriched.setdefault("prompt_hash", prompt_hash)
+            if isinstance(enriched.get("params"), dict):
+                enriched["params"].setdefault("candidate_count", 5)
+            else:
+                enriched["params"] = {"candidate_count": 5}
+            return obj, enriched
+        except (json.JSONDecodeError, ValueError) as e:
+            last_err = e
+            continue
 
     raise RuntimeError(f"Model returned invalid JSON after retries: {last_err}")

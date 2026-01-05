@@ -16,15 +16,21 @@ const btnStop = document.getElementById('btnStop');
 const btnSend = document.getElementById('btnSend');
 const sttText = document.getElementById('sttText');
 const candidatesEl = document.getElementById('candidates');
-const reasonTagsEl = document.getElementById('reasonTags');
-const reasonCountEl = document.getElementById('reasonCount');
+const reasonGoodTagsEl = document.getElementById('reasonGoodTags');
+const reasonBadTagsEl = document.getElementById('reasonBadTags');
+const reasonGoodCountEl = document.getElementById('reasonGoodCount');
+const reasonBadCountEl = document.getElementById('reasonBadCount');
+const goodTagsPanelEl = document.getElementById('goodTagsPanel');
 
-const REASON_TAGS = [
+const GOOD_REASON_TAGS = [
   { id: 'tempo_good', desc: 'テンポ良い/短い' },
   { id: 'metaphor_good', desc: '比喩が刺さる' },
   { id: 'punch_good', desc: '追い打ちが効いている' },
   { id: 'wrap_good', desc: 'オチ/巻き取りが良い' },
   { id: 'character_good', desc: 'キャラが立っている' },
+];
+
+const BAD_REASON_TAGS = [
   { id: 'too_long', desc: '長い' },
   { id: 'too_safe', desc: '無難/正論' },
   { id: 'unclear', desc: '意味が分からない' },
@@ -62,23 +68,29 @@ function clearTurn() {
   sttText.value = '';
   candidatesEl.innerHTML = '';
   clearReasonTags();
+  setGoodTagsInvalid(false);
   setError('');
   setStatus('次ターン準備完了');
   setButtons({ start: true, stop: false, send: false });
   btnStart.focus();
 }
 
-function renderReasonTags() {
-  if (!reasonTagsEl) return;
-  reasonTagsEl.innerHTML = '';
-  for (const t of REASON_TAGS) {
+function setGoodTagsInvalid(isInvalid) {
+  if (!goodTagsPanelEl) return;
+  goodTagsPanelEl.classList.toggle('invalid', Boolean(isInvalid));
+}
+
+function renderTagGroup(rootEl, tags, groupIdPrefix) {
+  if (!rootEl) return;
+  rootEl.innerHTML = '';
+  for (const t of tags) {
     const wrap = document.createElement('div');
     wrap.className = 'reasonTag';
 
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.value = t.id;
-    cb.id = `tag_${t.id}`;
+    cb.id = `${groupIdPrefix}_${t.id}`;
     cb.addEventListener('change', updateReasonCount);
 
     const label = document.createElement('label');
@@ -95,30 +107,46 @@ function renderReasonTags() {
 
     wrap.appendChild(cb);
     wrap.appendChild(textWrap);
-    reasonTagsEl.appendChild(wrap);
+    rootEl.appendChild(wrap);
   }
+}
+
+function renderReasonTags() {
+  renderTagGroup(reasonGoodTagsEl, GOOD_REASON_TAGS, 'good');
+  renderTagGroup(reasonBadTagsEl, BAD_REASON_TAGS, 'bad');
   updateReasonCount();
 }
 
-function selectedReasonTags() {
+function selectedTags(selector) {
   const tags = [];
-  const els = document.querySelectorAll('#reasonTags input[type="checkbox"]');
+  const els = document.querySelectorAll(selector);
   for (const el of els) {
     if (el.checked) tags.push(el.value);
   }
   return tags;
 }
 
+function selectedGoodTags() {
+  return selectedTags('#reasonGoodTags input[type="checkbox"]');
+}
+
+function selectedBadTags() {
+  return selectedTags('#reasonBadTags input[type="checkbox"]');
+}
+
 function clearReasonTags() {
-  const els = document.querySelectorAll('#reasonTags input[type="checkbox"]');
+  const els = document.querySelectorAll('#reasonGoodTags input[type="checkbox"], #reasonBadTags input[type="checkbox"]');
   for (const el of els) el.checked = false;
   updateReasonCount();
 }
 
 function updateReasonCount() {
-  if (!reasonCountEl) return;
-  const n = selectedReasonTags().length;
-  reasonCountEl.textContent = `選択タグ数: ${n}`;
+  if (reasonGoodCountEl) {
+    reasonGoodCountEl.textContent = `選択: ${selectedGoodTags().length}`;
+  }
+  if (reasonBadCountEl) {
+    reasonBadCountEl.textContent = `選択: ${selectedBadTags().length}`;
+  }
 }
 
 function renderCandidates(candidates) {
@@ -240,15 +268,22 @@ function selectedWinnerIndex() {
 }
 
 function parseReasonTags() {
-  // Always return array (never null)
-  return selectedReasonTags();
+  return { good: selectedGoodTags(), bad: selectedBadTags() };
 }
 
 async function sendLabel() {
   setError('');
+  setGoodTagsInvalid(false);
 
   if (!currentTurnId || !currentCandidates || currentCandidates.length !== 5) {
     setError('候補が5つ揃っていません。');
+    return;
+  }
+
+  const { good, bad } = parseReasonTags();
+  if (!good || good.length < 1) {
+    setGoodTagsInvalid(true);
+    setError('良かった点（reason_good_tags）を最低1つ選んでください。');
     return;
   }
 
@@ -258,7 +293,8 @@ async function sendLabel() {
     raw_stt_text: currentRawSttText || null,
     candidates: currentCandidates,
     winner_index: selectedWinnerIndex(),
-    reason_tags: parseReasonTags(),
+    reason_good_tags: good,
+    reason_bad_tags: bad,
     stt_ref: currentSttRef,
     fewshot_used: currentFewshotUsed || [],
     gen_ref: currentGenRaw || null,

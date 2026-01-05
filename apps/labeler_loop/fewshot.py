@@ -49,6 +49,10 @@ def sample_fewshot(labels_path: Path, k_min: int = 2, k_max: int = 3) -> list[di
                 w = candidates[winner_index]
                 if isinstance(w, str):
                     winner = w
+                elif isinstance(w, dict):
+                    t = w.get("text")
+                    if isinstance(t, str):
+                        winner = t
             if inp_text and winner:
                 out.append({"id": rid, "input": inp_text, "winner": winner})
         except Exception:

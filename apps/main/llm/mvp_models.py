@@ -9,7 +9,7 @@ class SafetyOut(BaseModel):
 
 
 class LLMOut(BaseModel):
-    speech_text: str = Field(..., min_length=1, max_length=400)
+    speech_text: str = Field(..., min_length=1, max_length=1000)
     overlay_text: str = Field(..., min_length=1, max_length=120)
     emotion: str = Field(default="neutral")
     motion_tags: list[str] = Field(default_factory=list)

@@ -668,9 +668,22 @@
     pollLive2D();
 
     // Quick way to reach settings.
-    document.addEventListener('dblclick', () => {
+    document.addEventListener('dblclick', (ev) => {
       try {
-        window.location.href = '/console';
+        // Prevent any default double-click behavior from triggering navigation.
+        if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+        if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
+        if (ev && typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+        // Using a real anchor click is more reliable than window.open across browsers.
+        const a = document.createElement('a');
+        a.href = '/console';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
       } catch {
         // ignore
       }

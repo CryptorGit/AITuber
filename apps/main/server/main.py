@@ -35,8 +35,8 @@ from apps.main.vlm.screenshot import ScreenshotCapturer
 from apps.main.vlm.summarizer import VLMSummarizer
 from apps.main.llm.gemini_mvp import GeminiMVP
 from apps.main.llm.openai_chat import OpenAIChatMVP
-from apps.main.stt.openai_service import transcribe_audio_via_openai
 from apps.main.stt.google_service import GoogleSTTConfig, transcribe_wav_via_google
+from apps.main.stt.webrtc_vad import webrtc_vad_filter
 from apps.main.stt.whisper_service import WhisperConfig, transcribe_pcm, get_model
 
 
@@ -292,6 +292,14 @@ def _make_llm_and_vlm(
     for k in ("temperature", "top_p", "max_output_tokens"):
         if k in vlm_cfg:
             vlm_gen[k] = vlm_cfg.get(k)
+
+    # Gemini models may allocate a large hidden "thought" budget from max_output_tokens,
+    # causing extremely short visible outputs (FinishReason.MAX_TOKENS). Default to no thinking
+    # unless the user explicitly sets it.
+    if "thinking_config" not in llm_gen:
+        llm_gen["thinking_config"] = {"thinking_budget": 0}
+    if "thinking_config" not in vlm_gen:
+        vlm_gen["thinking_config"] = {"thinking_budget": 0}
 
     prov = (llm_provider or settings.llm_provider or "gemini").strip().lower()
     if prov == "openai":
@@ -1319,7 +1327,7 @@ def config_load_all() -> Dict[str, Any]:
         else llm_store.get("max_output_tokens")
     )
     if llm_max_tokens is None:
-        llm_max_tokens = 1024
+        llm_max_tokens = 2048
 
     vlm_raw = raw.get("vlm") if isinstance(raw, dict) else {}
     vlm_store = _get_long_term_doc_json(lt, doc_id="settings_vlm")
@@ -1426,7 +1434,7 @@ def config_providers(req: ProviderUpdateIn) -> Dict[str, Any]:
     updates: Dict[str, str] = {}
 
     stt = (req.stt_provider or "").strip().lower()
-    if stt in ("local", "openai"):
+    if stt in ("local", "google"):
         updates["AITUBER_STT_PROVIDER"] = stt
 
     llm = (req.llm_provider or "").strip().lower()
@@ -2548,11 +2556,15 @@ async def stt_audio(
     lang: str = Form(default="ja-JP"),
     vad_enabled: str = Form(default="1"),
     vad_threshold: float = Form(default=0.01),
+    vad_aggressiveness: int = Form(default=1),
+    vad_padding_ms: int = Form(default=700),
+    vad_min_speech_ms: int = Form(default=350),
+    vad_frame_ms: int = Form(default=30),
     stt_provider: str = Form(default=""),
     stt_enabled: str = Form(default="1"),
     vlm_force: str = Form(default="0"),
 ) -> Dict[str, Any]:
-    """Transcribe microphone audio into text using local Whisper or OpenAI.
+    """Transcribe microphone audio into text using local Whisper or Google.
 
     Expected input: WAV (PCM) from the browser.
     """
@@ -2603,6 +2615,7 @@ async def stt_audio(
         vad_thr = 0.01
     vad_thr = max(0.0, min(1.0, vad_thr))
     if vad_on:
+        # Fast gate (kept for compatibility): if it's extremely quiet, skip early.
         try:
             max_amp = float(np.max(np.abs(audio))) if audio.size else 0.0
         except Exception:
@@ -2610,10 +2623,63 @@ async def stt_audio(
         if max_amp < vad_thr:
             return STTAudioOut(ok=False, text="", error="no_voice").model_dump(mode="json")
 
+        # WebRTC VAD pre-filter: feed ONLY voiced audio to STT.
+        # If webrtcvad isn't installed, we fall back to the max_amp gate above.
+        try:
+            # Clamp inputs to safe ranges.
+            vad_aggr = int(max(0, min(3, int(vad_aggressiveness))))
+            vad_pad = int(max(0, min(2000, int(vad_padding_ms))))
+            vad_min_ms = int(max(0, min(3000, int(vad_min_speech_ms))))
+            vad_frame = int(vad_frame_ms)
+            if vad_frame not in (10, 20, 30):
+                vad_frame = 30
+
+            vad_res = webrtc_vad_filter(
+                audio_f32=audio,
+                sample_rate=sr,
+                aggressiveness=vad_aggr,
+                frame_ms=vad_frame,
+                padding_ms=vad_pad,
+                min_speech_ms=vad_min_ms,
+            )
+        except Exception as e:
+            return STTAudioOut(ok=False, text="", error=f"vad_error:{type(e).__name__}").model_dump(mode="json")
+
+        if not vad_res.ok:
+            if vad_res.reason == "missing_dep:webrtcvad":
+                # Dependency missing: keep going with original audio.
+                pass
+            else:
+                # no_voice / empty_audio
+                return STTAudioOut(ok=False, text="", error=vad_res.reason).model_dump(mode="json")
+        else:
+            audio = vad_res.audio_f32
+            sr = int(vad_res.sample_rate)
+            # Re-encode filtered audio for providers expecting WAV bytes.
+            try:
+                import io
+                import wave
+
+                pcm16 = (audio * 32767.0).clip(-32768.0, 32767.0).astype(np.int16).tobytes(order="C")
+                buf = io.BytesIO()
+                with wave.open(buf, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sr)
+                    wf.writeframes(pcm16)
+                audio_bytes = buf.getvalue()
+            except Exception:
+                # If re-encoding fails, keep original bytes; whisper path still uses float PCM.
+                pass
+
     import os
 
     provider = (stt_provider or os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
-    provider_label = "google" if provider == "google" else ("openai" if provider == "openai" else "whisper")
+    # Backward compat: old configs may still say 'openai'. We do not support OpenAI STT anymore;
+    # fall back to local whisper so web UI keeps working.
+    if provider == "openai":
+        provider = "local"
+    provider_label = "google" if provider == "google" else "whisper"
     language = (lang or "ja-JP").split("-")[0].lower() or "ja"
 
     force_vlm = _parse_bool_flag(vlm_force, default=False)
@@ -2660,23 +2726,7 @@ async def stt_audio(
             return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
 
     elif provider == "openai":
-        model_name = (os.getenv("AITUBER_OPENAI_WHISPER_MODEL") or settings.openai_whisper_model or "whisper-1").strip() or "whisper-1"
-        chunk_count = 1
-        try:
-            text = await asyncio.to_thread(
-                transcribe_audio_via_openai,
-                audio_bytes=audio_bytes,
-                filename=file.filename or "audio.wav",
-                language=language,
-                api_key=settings.openai_api_key,
-                model=model_name,
-            )
-        except ModuleNotFoundError as e:
-            return STTAudioOut(ok=False, text="", error=f"missing_dep:{e.name}").model_dump(mode="json")
-        except ValueError as e:
-            return STTAudioOut(ok=False, text="", error=str(e)[:200]).model_dump(mode="json")
-        except Exception as e:
-            return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
+        return STTAudioOut(ok=False, text="", error="stt_provider_unsupported:openai").model_dump(mode="json")
     else:
         model_name = _normalize_whisper_model_name(
             os.getenv("AITUBER_WHISPER_MODEL") or settings.whisper_model
@@ -2788,7 +2838,6 @@ def stt_warmup() -> Dict[str, Any]:
     """Warm up STT provider.
 
     - google: instantiate Speech client (credential check)
-    - openai: report model
     - local/whisper: preload faster-whisper model
     """
     import os
@@ -2804,8 +2853,7 @@ def stt_warmup() -> Dict[str, Any]:
         except Exception as e:
             return {"ok": False, "provider": "google", "error": f"{type(e).__name__}: {e}"[:200]}
     if provider == "openai":
-        model_name = (os.getenv("AITUBER_OPENAI_WHISPER_MODEL") or settings.openai_whisper_model or "whisper-1").strip() or "whisper-1"
-        return {"ok": True, "provider": "openai", "model": model_name}
+        return {"ok": False, "provider": "openai", "error": "unsupported"}
 
     if provider not in ("local", "whisper", "faster-whisper"):
         return {"ok": False, "provider": provider, "error": "unknown_provider"}

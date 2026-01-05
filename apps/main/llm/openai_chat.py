@@ -141,7 +141,7 @@ class OpenAIChatMVP:
             f"rag_context:\n{rag_context}\n\n"
             "# Output JSON schema\n"
             "{\n"
-            '  \"speech_text\": \"Short text for TTS (<=400 chars)\",\n'
+            '  \"speech_text\": \"Text for TTS (<=1000 chars)\",\n'
             '  \"overlay_text\": \"Short overlay text (<=120 chars)\",\n'
             '  \"emotion\": \"neutral|happy|angry|sad|excited|confused\",\n'
             '  \"motion_tags\": [\"greet\",\"laugh\",\"think\",\"nod\",\"smile\",\"neutral\"],\n'

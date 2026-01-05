@@ -47,7 +47,7 @@ class SafetyModel(BaseModel):
 class AssistantOutput(BaseModel):
     """Structured output produced by LLM and validated before approval."""
 
-    speech_text: str = Field(..., min_length=1, max_length=400)
+    speech_text: str = Field(..., min_length=1, max_length=1000)
     overlay_text: str = Field(..., min_length=1, max_length=120)
     emotion: str = Field(default="neutral")
     motion_tags: List[str] = Field(default_factory=list)

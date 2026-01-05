@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -15,6 +16,68 @@ class GeminiMVP:
     model: str
     system_prompt: Optional[str] = None
     generation_config: Optional[Dict[str, Any]] = None
+
+    @staticmethod
+    def _resp_to_text(resp: Any) -> str:
+        """Best-effort extraction of response text.
+
+        Some google-genai SDK versions / response shapes can yield an incomplete
+        `resp.text` (e.g., only the first part). Prefer concatenating all text
+        parts when available.
+        """
+        # Fast path: resp.text
+        try:
+            t = (getattr(resp, "text", None) or "")
+            if isinstance(t, str) and t.strip():
+                text0 = t.strip()
+            else:
+                text0 = ""
+        except Exception:
+            text0 = ""
+
+        def _as_dict(x: Any) -> Optional[Dict[str, Any]]:
+            if isinstance(x, dict):
+                return x
+            try:
+                md = getattr(x, "model_dump", None)
+                if callable(md):
+                    out = md()
+                    return out if isinstance(out, dict) else None
+            except Exception:
+                return None
+            return None
+
+        def _is_seq(x: Any) -> bool:
+            return isinstance(x, Sequence) and not isinstance(x, (str, bytes, bytearray))
+
+        # Robust path: candidates[*].content.parts[*].text
+        parts_text: list[str] = []
+        try:
+            resp_dict = _as_dict(resp)
+            candidates = resp_dict.get("candidates") if resp_dict is not None else getattr(resp, "candidates", None)
+
+            if candidates and _is_seq(candidates):
+                for cand in candidates:
+                    cand_dict = _as_dict(cand)
+                    content = cand_dict.get("content") if cand_dict is not None else getattr(cand, "content", None)
+
+                    content_dict = _as_dict(content)
+                    parts = content_dict.get("parts") if content_dict is not None else getattr(content, "parts", None) if content is not None else None
+
+                    if parts and _is_seq(parts):
+                        for p in parts:
+                            p_dict = _as_dict(p)
+                            pt = p_dict.get("text") if p_dict is not None else getattr(p, "text", None)
+                            if isinstance(pt, str) and pt:
+                                parts_text.append(pt)
+        except Exception:
+            parts_text = []
+
+        text1 = "".join(parts_text).strip() if parts_text else ""
+        # Prefer the longer non-empty extraction.
+        if text1 and (not text0 or len(text1) > len(text0)):
+            return text1
+        return text0
 
     def generate(self, *, user_text: str, rag_context: str, vlm_summary: str) -> LLMOut:
         return self.generate_full(user_text=user_text, rag_context=rag_context, vlm_summary=vlm_summary)
@@ -74,7 +137,7 @@ class GeminiMVP:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                     fut = ex.submit(_call)
                     resp = fut.result(timeout=timeout_seconds)
-                text = (resp.text or "").strip()
+                text = self._resp_to_text(resp)
                 if not text:
                     last_err = "empty_response"
                     continue

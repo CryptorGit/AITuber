@@ -22,4 +22,13 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 }
 
 Write-Host "[run_server] Starting uvicorn on $HostAddr`:$Port" -ForegroundColor Cyan
-.\.venv\Scripts\python.exe -m uvicorn apps.main.server.main:app --host $HostAddr --port $Port --reload
+
+# Uvicorn access logs can be extremely noisy due to polling endpoints (e.g. /overlay_text).
+# Default: suppress access log. Set AITUBER_UVICORN_ACCESS_LOG=1 to re-enable.
+$accessLog = (($env:AITUBER_UVICORN_ACCESS_LOG + '').Trim().ToLower())
+$args = @('uvicorn','apps.main.server.main:app','--host',$HostAddr,'--port',[string]$Port,'--reload')
+if ($accessLog -notin @('1','true','yes','on')) {
+  $args += '--no-access-log'
+}
+
+& .\.venv\Scripts\python.exe -m @args

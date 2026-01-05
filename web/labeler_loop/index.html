@@ -33,11 +33,23 @@
       </section>
 
       <section class="panel">
-        <h2 class="subtitle">理由タグ（任意）</h2>
-        <div class="reasonMeta">
-          <div id="reasonCount" class="hint">選択タグ数: 0</div>
+        <h2 class="subtitle">理由タグ</h2>
+
+        <div id="goodTagsPanel" class="tagsPanel">
+          <div class="tagsHeader">
+            <div class="tagsTitle">良かった点（必須: 1つ以上）</div>
+            <div id="reasonGoodCount" class="hint">選択: 0</div>
+          </div>
+          <div id="reasonGoodTags" class="reasonTags"></div>
         </div>
-        <div id="reasonTags" class="reasonTags"></div>
+
+        <div class="tagsPanel">
+          <div class="tagsHeader">
+            <div class="tagsTitle">気になった点（任意）</div>
+            <div id="reasonBadCount" class="hint">選択: 0</div>
+          </div>
+          <div id="reasonBadTags" class="reasonTags"></div>
+        </div>
 
         <div class="sendBar">
           <button id="btnSend" class="btn primary" disabled>送信</button>

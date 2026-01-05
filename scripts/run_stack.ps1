@@ -93,6 +93,13 @@ if (Wait-Healthy -BaseUrl $baseUrl -TimeoutSeconds 2) {
 
 $uvArgs = @('uvicorn','apps.server.main:app','--host',$HostAddr,'--port',[string]$Port)
 
+# Uvicorn access logs can be extremely noisy due to polling endpoints.
+# Default: suppress access log. Set AITUBER_UVICORN_ACCESS_LOG=1 to re-enable.
+$accessLog = (($env:AITUBER_UVICORN_ACCESS_LOG + '').Trim().ToLower())
+if ($accessLog -notin @('1','true','yes','on')) {
+  $uvArgs += '--no-access-log'
+}
+
 Write-Host ''
 Write-Host '---' -ForegroundColor DarkGray
 Write-Host "Console: http://$HostAddr`:$Port/console" -ForegroundColor Green

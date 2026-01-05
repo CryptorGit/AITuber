@@ -27,6 +27,10 @@
     mouseMode: document.getElementById('mouseMode'),
     vadEnabled: document.getElementById('vadEnabled'),
     vadThreshold: document.getElementById('vadThreshold'),
+    vadAggressiveness: document.getElementById('vadAggressiveness'),
+    vadPaddingMs: document.getElementById('vadPaddingMs'),
+    vadMinSpeechMs: document.getElementById('vadMinSpeechMs'),
+    vadFrameMs: document.getElementById('vadFrameMs'),
     vlmEnabled: document.getElementById('vlmEnabled'),
     ragEnabled: document.getElementById('ragEnabled'),
     shortTermMaxEvents: document.getElementById('shortTermMaxEvents'),
@@ -193,11 +197,17 @@
       const form = new FormData();
       form.append('lang', 'ja-JP');
       form.append('file', wav, 'mic.wav');
-      // For google non-stream mode, avoid aggressive VAD (it tends to cut on breaths/pauses).
-      const vadOn = isGoogleStt() ? '0' : (el.vadEnabled && el.vadEnabled.checked ? '1' : '0');
+      // Server-side VAD: controlled by UI toggle for all providers.
+      const vadOn = el.vadEnabled && el.vadEnabled.checked ? '1' : '0';
       const vadThr = el.vadThreshold ? String(el.vadThreshold.value || '0.005') : '0.005';
       form.append('vad_enabled', vadOn);
       form.append('vad_threshold', vadThr);
+
+      // WebRTC VAD tuning (server-side)
+      if (el.vadAggressiveness) form.append('vad_aggressiveness', String(el.vadAggressiveness.value || '1'));
+      if (el.vadPaddingMs) form.append('vad_padding_ms', String(el.vadPaddingMs.value || '700'));
+      if (el.vadMinSpeechMs) form.append('vad_min_speech_ms', String(el.vadMinSpeechMs.value || '350'));
+      if (el.vadFrameMs) form.append('vad_frame_ms', String(el.vadFrameMs.value || '30'));
       form.append('stt_provider', getSttProvider());
       form.append('stt_enabled', el.sttEnabled && el.sttEnabled.checked ? '1' : '0');
       const vlmForce = el.vlmEnabled && el.vlmEnabled.checked ? '1' : '0';
@@ -253,8 +263,13 @@
     return v || fallback;
   }
 
+  function normalizeSttProvider(v) {
+    const p = String(v || '').trim().toLowerCase();
+    return p === 'google' ? 'google' : 'local';
+  }
+
   function getSttProvider() {
-    return getProviderValue(el.sttProvider, 'local');
+    return normalizeSttProvider(getProviderValue(el.sttProvider, 'local'));
   }
 
   function getLlmProvider() {
@@ -444,6 +459,18 @@
     if (el.vadThreshold) {
       el.vadThreshold.value = localStorage.getItem('aituber.stt.vadThreshold') || '0.005';
     }
+    if (el.vadAggressiveness) {
+      el.vadAggressiveness.value = localStorage.getItem('aituber.stt.vadAggressiveness') || '1';
+    }
+    if (el.vadPaddingMs) {
+      el.vadPaddingMs.value = localStorage.getItem('aituber.stt.vadPaddingMs') || '700';
+    }
+    if (el.vadMinSpeechMs) {
+      el.vadMinSpeechMs.value = localStorage.getItem('aituber.stt.vadMinSpeechMs') || '350';
+    }
+    if (el.vadFrameMs) {
+      el.vadFrameMs.value = localStorage.getItem('aituber.stt.vadFrameMs') || '30';
+    }
     if (el.vlmEnabled) {
       el.vlmEnabled.checked = localStorage.getItem('aituber.vlm.enabled') === '1';
     }
@@ -455,6 +482,8 @@
     }
 
     if (el.sttProvider) el.sttProvider.value = localStorage.getItem('aituber.provider.stt') || 'local';
+    // Coerce stale values (e.g. 'openai') to supported providers.
+    if (el.sttProvider) el.sttProvider.value = normalizeSttProvider(el.sttProvider.value);
     if (el.llmProvider) el.llmProvider.value = localStorage.getItem('aituber.provider.llm') || 'gemini';
     if (el.ttsProvider) el.ttsProvider.value = localStorage.getItem('aituber.provider.tts') || 'google';
     if (el.providerPreset) el.providerPreset.value = localStorage.getItem('aituber.provider.preset') || '';
@@ -473,6 +502,18 @@
     }
     if (el.vadThreshold) {
       localStorage.setItem('aituber.stt.vadThreshold', String(el.vadThreshold.value || '0.005'));
+    }
+    if (el.vadAggressiveness) {
+      localStorage.setItem('aituber.stt.vadAggressiveness', String(el.vadAggressiveness.value || '1'));
+    }
+    if (el.vadPaddingMs) {
+      localStorage.setItem('aituber.stt.vadPaddingMs', String(el.vadPaddingMs.value || '700'));
+    }
+    if (el.vadMinSpeechMs) {
+      localStorage.setItem('aituber.stt.vadMinSpeechMs', String(el.vadMinSpeechMs.value || '350'));
+    }
+    if (el.vadFrameMs) {
+      localStorage.setItem('aituber.stt.vadFrameMs', String(el.vadFrameMs.value || '30'));
     }
     if (el.sttProvider) {
       localStorage.setItem('aituber.provider.stt', String(el.sttProvider.value || 'local'));
@@ -772,9 +813,6 @@
       if (sttBusy) return;
       if (!pcmChunks.length) return;
 
-      // google: do not stream; send once when recording stops.
-      if (isGoogleStt()) return;
-
       // Take snapshot and clear
       const chunks = pcmChunks;
       pcmChunks = [];
@@ -782,14 +820,10 @@
       await postSttWavAndSubmit(wav);
     }
 
-    // Send chunk every ~0.8s (except google: non-stream)
-    if (isGoogleStt()) {
-      sttTimer = null;
-      el.speechStatus.textContent = 'STT: recording started (google, non-stream).';
-    } else {
-      sttTimer = setInterval(flushChunk, 800);
-      el.speechStatus.textContent = 'STT: recording started (streaming).';
-    }
+    // Send chunk every ~0.8s for all providers.
+    // For google, this behaves like pseudo-streaming (repeated non-stream requests).
+    sttTimer = setInterval(flushChunk, 800);
+    el.speechStatus.textContent = isGoogleStt() ? 'STT: recording started (google, chunked).' : 'STT: recording started (streaming).';
   }
 
   async function loadHotkeysAndRenderSelect() {
@@ -894,7 +928,7 @@
   function applySettings(settings) {
     const s = settings || {};
     const providers = s.providers || {};
-    if (el.sttProvider) el.sttProvider.value = String(providers.stt || 'local');
+    if (el.sttProvider) el.sttProvider.value = normalizeSttProvider(String(providers.stt || 'local'));
     if (el.llmProvider) el.llmProvider.value = String(providers.llm || 'gemini');
     if (el.ttsProvider) el.ttsProvider.value = String(providers.tts || 'google');
 
@@ -1200,6 +1234,43 @@
       el.vadThreshold.onchange = () => {
         try {
           localStorage.setItem('aituber.stt.vadThreshold', String(el.vadThreshold.value || '0.01'));
+        } catch {
+          // ignore
+        }
+      };
+    }
+
+    if (el.vadAggressiveness) {
+      el.vadAggressiveness.onchange = () => {
+        try {
+          localStorage.setItem('aituber.stt.vadAggressiveness', String(el.vadAggressiveness.value || '1'));
+        } catch {
+          // ignore
+        }
+      };
+    }
+    if (el.vadPaddingMs) {
+      el.vadPaddingMs.onchange = () => {
+        try {
+          localStorage.setItem('aituber.stt.vadPaddingMs', String(el.vadPaddingMs.value || '700'));
+        } catch {
+          // ignore
+        }
+      };
+    }
+    if (el.vadMinSpeechMs) {
+      el.vadMinSpeechMs.onchange = () => {
+        try {
+          localStorage.setItem('aituber.stt.vadMinSpeechMs', String(el.vadMinSpeechMs.value || '350'));
+        } catch {
+          // ignore
+        }
+      };
+    }
+    if (el.vadFrameMs) {
+      el.vadFrameMs.onchange = () => {
+        try {
+          localStorage.setItem('aituber.stt.vadFrameMs', String(el.vadFrameMs.value || '30'));
         } catch {
           // ignore
         }

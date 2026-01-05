@@ -157,3 +157,26 @@ textarea {
   display: flex;
   justify-content: flex-end;
 }
+
+.tagsPanel {
+  margin-top: 10px;
+}
+
+.tagsHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tagsTitle {
+  font-size: 13px;
+  color: #c8d4e0;
+}
+
+.tagsPanel.invalid {
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid #7a2e2e;
+  background: #2a1212;
+}

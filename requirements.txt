@@ -27,6 +27,7 @@ openai>=1.12
 # STT (local)
 faster-whisper>=1.1
 numpy>=1.26
+webrtcvad>=2.0.10
 
 # Optional: title wordcloud generation
 janome>=0.5

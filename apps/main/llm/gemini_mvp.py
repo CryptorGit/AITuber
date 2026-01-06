@@ -191,18 +191,18 @@ class GeminiMVP:
         system_prompt: Optional[str],
     ) -> str:
         sys = (system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
-        instr = read_prompt_text(name="gemini_json_instructions").strip()
-        header = (sys + "\n" + instr).strip() if instr else sys
-        return (
-            header
-            + "\n\n"
-            "# 入力\n"
-            f"user_text: {user_text}\n\n"
-            "# VLM要約（スクショ）\n"
-            f"vlm_summary: {vlm_summary}\n\n"
-            "# RAG文脈（短期/長期の抜粋）\n"
-            f"rag_context:\n{rag_context}\n\n"
-        )
+        parts: list[str] = []
+        ut = (user_text or "").strip()
+        if ut:
+            parts.append(ut)
+        vs = (vlm_summary or "").strip()
+        if vs:
+            parts.append("[VLM]\n" + vs)
+        rc = (rag_context or "").strip()
+        if rc:
+            parts.append("[RAG]\n" + rc)
+        body = "\n\n".join([p for p in parts if p]).strip() or "（入力なし）"
+        return (sys + "\n\n" + body).strip() + "\n"
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         try:

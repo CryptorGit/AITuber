@@ -5,14 +5,6 @@ from pathlib import Path
 from apps.main.core.storage import read_json
 
 
-DEFAULT_LLM_SYSTEM_PROMPT = """
-あなたは日本語で会話する配信アシスタントです。
-
-ユーザーの質問には、途中で途切れないように最後まで丁寧に答えてください。
-箇条書きや短い見出しを使って読みやすくして構いません。
-""".strip()
-
-
 def _find_repo_root(start: Path) -> Path:
     p = start.resolve()
     for parent in [p] + list(p.parents):
@@ -34,24 +26,19 @@ def read_prompt_text(*, name: str) -> str:
     Supported names:
     - llm_system
     - vlm_system
-    - gemini_json_instructions
     """
     repo_root = _find_repo_root(Path(__file__))
-    path = repo_root / "data" / "config" / "console_settings.json"
-    obj = read_json(path) or {}
+
+    # Web-saved settings are the single source of truth.
+    settings_path = repo_root / "data" / "config" / "console_settings.json"
+    obj = read_json(settings_path) or {}
 
     if name == "llm_system":
         llm = obj.get("llm") if isinstance(obj.get("llm"), dict) else {}
-        sys = str(llm.get("system_prompt") or "").strip()
-        return sys or DEFAULT_LLM_SYSTEM_PROMPT
+        return str(llm.get("system_prompt") or "").strip()
 
     if name == "vlm_system":
         vlm = obj.get("vlm") if isinstance(obj.get("vlm"), dict) else {}
         return str(vlm.get("system_prompt") or "").strip()
-
-    if name == "gemini_json_instructions":
-        llm = obj.get("llm") if isinstance(obj.get("llm"), dict) else {}
-        # Optional: allow JSON instructions to be stored in the same JSON.
-        return str(llm.get("json_instructions") or "").strip()
 
     return ""

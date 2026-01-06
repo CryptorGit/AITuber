@@ -28,13 +28,15 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
 
 def read_json(path: Path) -> Optional[JsonDict]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        # Use utf-8-sig to tolerate UTF-8 BOM (common on Windows/PowerShell).
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except FileNotFoundError:
         return None
 
 
 def write_json(path: Path, obj: Any) -> None:
-    atomic_write_text(path, json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Write with BOM so Windows PowerShell shows Japanese text correctly.
+    atomic_write_text(path, json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8-sig")
 
 
 @dataclass

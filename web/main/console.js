@@ -25,12 +25,7 @@
     stageBg: document.getElementById('stageBg'),
     overlayFont: document.getElementById('overlayFont'),
     mouseMode: document.getElementById('mouseMode'),
-    vadEnabled: document.getElementById('vadEnabled'),
-    vadThreshold: document.getElementById('vadThreshold'),
-    vadAggressiveness: document.getElementById('vadAggressiveness'),
-    vadPaddingMs: document.getElementById('vadPaddingMs'),
-    vadMinSpeechMs: document.getElementById('vadMinSpeechMs'),
-    vadFrameMs: document.getElementById('vadFrameMs'),
+    whisperDevice: document.getElementById('whisperDevice'),
     vlmEnabled: document.getElementById('vlmEnabled'),
     ragEnabled: document.getElementById('ragEnabled'),
     shortTermMaxEvents: document.getElementById('shortTermMaxEvents'),
@@ -66,11 +61,6 @@
     vlmMaxTokens: document.getElementById('vlmMaxTokens'),
     vlmSave: document.getElementById('vlmSave'),
     vlmPromptStatus: document.getElementById('vlmPromptStatus'),
-
-    providerPreset: document.getElementById('providerPreset'),
-    sttProvider: document.getElementById('sttProvider'),
-    llmProvider: document.getElementById('llmProvider'),
-    ttsProvider: document.getElementById('ttsProvider'),
   };
 
   let mediaStream = null;
@@ -82,6 +72,14 @@
   let pcmSampleRate = 48000;
   let sttTimer = null;
   let sttBusy = false;
+  // Client-side utterance buffering (silence-based segmentation)
+  let sttPreRollChunks = [];
+  let sttPreRollSamples = 0;
+  let sttUtteranceChunks = [];
+  let sttUtteranceSamples = 0;
+  let sttSpeechStarted = false;
+  let sttSpeechStartAt = 0;
+  let sttLastVoiceAt = 0;
   let sttBuffer = '';
   let sttAbortController = null;
   let submitBusy = false;
@@ -120,6 +118,27 @@
     if (el.sttText) el.sttText.value = '';
   }
 
+  function _rmsOfFloat32(buf) {
+    if (!buf || !buf.length) return 0;
+    let sum = 0;
+    for (let i = 0; i < buf.length; i += 1) {
+      const v = buf[i];
+      sum += v * v;
+    }
+    return Math.sqrt(sum / buf.length);
+  }
+
+  function _resetSttSegmentation() {
+    sttPreRollChunks = [];
+    sttPreRollSamples = 0;
+    sttUtteranceChunks = [];
+    sttUtteranceSamples = 0;
+    sttSpeechStarted = false;
+    sttSpeechStartAt = 0;
+    sttLastVoiceAt = 0;
+    pcmChunks = [];
+  }
+
   function setSttText(text) {
     const t = String(text || '').trim();
     sttBuffer = t;
@@ -134,8 +153,10 @@
     if (el.sttText) el.sttText.value = sttBuffer;
   }
 
-  function isGoogleStt() {
-    return String(getSttProvider() || '').trim().toLowerCase() === 'google';
+  function getWhisperDevice() {
+    const v = el.whisperDevice ? String(el.whisperDevice.value || '') : String(localStorage.getItem('aituber.whisper_device') || 'cpu');
+    const s = v.trim().toLowerCase();
+    return s === 'gpu' || s === 'cuda' ? 'gpu' : 'cpu';
   }
 
   function encodeWavFloat32Mono(chunks, sampleRate) {
@@ -190,6 +211,7 @@
     if (!wav || wav.size < 4000) return;
     if (sttBusy) return;
     sttBusy = true;
+    let timeoutId = null;
     try {
       // Clear previous text immediately so it never lingers between recognitions.
       resetSttBuffer();
@@ -197,28 +219,31 @@
       const form = new FormData();
       form.append('lang', 'ja-JP');
       form.append('file', wav, 'mic.wav');
-      // Server-side VAD: controlled by UI toggle for all providers.
-      const vadOn = el.vadEnabled && el.vadEnabled.checked ? '1' : '0';
-      const vadThr = el.vadThreshold ? String(el.vadThreshold.value || '0.005') : '0.005';
-      form.append('vad_enabled', vadOn);
-      form.append('vad_threshold', vadThr);
-
-      // WebRTC VAD tuning (server-side)
-      if (el.vadAggressiveness) form.append('vad_aggressiveness', String(el.vadAggressiveness.value || '1'));
-      if (el.vadPaddingMs) form.append('vad_padding_ms', String(el.vadPaddingMs.value || '700'));
-      if (el.vadMinSpeechMs) form.append('vad_min_speech_ms', String(el.vadMinSpeechMs.value || '350'));
-      if (el.vadFrameMs) form.append('vad_frame_ms', String(el.vadFrameMs.value || '30'));
-      form.append('stt_provider', getSttProvider());
+      form.append('whisper_device', getWhisperDevice());
       form.append('stt_enabled', el.sttEnabled && el.sttEnabled.checked ? '1' : '0');
       const vlmForce = el.vlmEnabled && el.vlmEnabled.checked ? '1' : '0';
       form.append('vlm_force', vlmForce);
 
       sttAbortController = new AbortController();
+      // If Whisper is still loading/downloading, the request can take a long time.
+      // Ensure the UI never gets stuck in "sending_audio" forever.
+      timeoutId = setTimeout(() => {
+        try {
+          if (sttAbortController) sttAbortController.abort();
+        } catch {
+          // ignore
+        }
+      }, 15000);
       const j = await formPost('/stt/audio', form, { signal: sttAbortController.signal });
       const text = j && j.ok ? String(j.text || '').trim() : '';
       const vlmSummary = j && j.vlm_summary ? String(j.vlm_summary || '').trim() : '';
       if (!text) {
-        if (el.speechStatus) el.speechStatus.textContent = `STT: ${(j && j.error) || 'no_transcript'}`;
+        const err = (j && j.error) || 'no_transcript';
+        const dbg = j && j.debug ? j.debug : null;
+        if (el.speechStatus) {
+          const dbgStr = dbg ? ` (audio_ms=${dbg.audio_ms ?? '?'}, max_amp=${dbg.max_amp ?? '?'}, rms=${dbg.rms ?? '?'})` : '';
+          el.speechStatus.textContent = `STT: ${err}${dbgStr}`;
+        }
         return;
       }
 
@@ -228,98 +253,50 @@
       await submitText(text, { vlmSummary });
     } catch (e) {
       if (e && e.name === 'AbortError') {
-        if (el.speechStatus) el.speechStatus.textContent = 'STT: canceled.';
+        if (el.speechStatus) el.speechStatus.textContent = 'STT: timeout/canceled (still listening).';
         return;
       }
       if (el.speechStatus) el.speechStatus.textContent = `STT error: ${e && e.message ? e.message : e}`;
     } finally {
+      if (timeoutId) {
+        try {
+          clearTimeout(timeoutId);
+        } catch {
+          // ignore
+        }
+      }
       sttBusy = false;
       sttAbortController = null;
     }
   }
 
-  async function stopRecorderAndMaybeSendFinal() {
-    // Google STT: non-streaming (send once at the end).
-    if (isGoogleStt() && pcmChunks && pcmChunks.length) {
-      const chunks = pcmChunks;
-      pcmChunks = [];
-      const sr = pcmSampleRate;
-      const wav = encodeWavFloat32Mono(chunks, sr);
-      stopRecorder();
-      await postSttWavAndSubmit(wav);
-      return;
-    }
-    stopRecorder();
-  }
-
-  const PROVIDER_PRESETS = {
-    local: { stt: 'local', llm: 'gemini', tts: 'google' },
-    google: { stt: 'google', llm: 'gemini', tts: 'google' },
-  };
-
-  function getProviderValue(node, fallback) {
-    if (!node) return fallback;
-    const v = String(node.value || '').trim();
-    return v || fallback;
-  }
-
-  function normalizeSttProvider(v) {
-    const p = String(v || '').trim().toLowerCase();
-    return p === 'google' ? 'google' : 'local';
-  }
-
-  function getSttProvider() {
-    return normalizeSttProvider(getProviderValue(el.sttProvider, 'local'));
-  }
-
-  function getLlmProvider() {
-    return 'gemini';
-  }
-
-  function getTtsProvider() {
-    return 'google';
-  }
-
-  function shouldIncludeVlm(_text, _summary) {
-    return Boolean(el.vlmEnabled && el.vlmEnabled.checked);
-  }
-
-  function syncPresetFromProviders() {
-    if (!el.providerPreset) return;
-    const stt = getSttProvider();
-    const llm = getLlmProvider();
-    const tts = getTtsProvider();
-    for (const key of Object.keys(PROVIDER_PRESETS)) {
-      const p = PROVIDER_PRESETS[key];
-      if (p.stt === stt && p.llm === llm && p.tts === tts) {
-        el.providerPreset.value = key;
-        return;
-      }
-    }
-    el.providerPreset.value = '';
-  }
-
-  function applyProviderPreset(key) {
-    const preset = PROVIDER_PRESETS[key];
-    if (!preset) return;
-    if (el.sttProvider) el.sttProvider.value = preset.stt;
-    if (el.llmProvider) el.llmProvider.value = preset.llm;
-    if (el.ttsProvider) el.ttsProvider.value = preset.tts;
-  }
-
-  async function syncProvidersToEnv() {
+  async function warmupStt() {
     try {
-      await jsonFetch('/config/providers', {
+      await jsonFetch('/stt/warmup', {
         method: 'POST',
-        body: JSON.stringify({
-          stt_provider: getSttProvider(),
-          llm_provider: getLlmProvider(),
-          tts_provider: getTtsProvider(),
-        }),
+        body: JSON.stringify({ whisper_device: getWhisperDevice() }),
       });
     } catch {
       // ignore
     }
+  }
+
+  async function stopRecorderAndMaybeSendFinal() {
+    // Best-effort: send any buffered utterance before tearing down audio.
+    try {
+      if (sttSpeechStarted && sttUtteranceChunks && sttUtteranceChunks.length && !sttBusy) {
+        const wav = encodeWavFloat32Mono(sttUtteranceChunks, pcmSampleRate);
+        _resetSttSegmentation();
+        await postSttWavAndSubmit(wav);
+      }
+    } catch {
+      // ignore
+    }
+    stopRecorder();
+  }
+
+  function shouldIncludeVlm(_text, _summary) {
+    return Boolean(el.vlmEnabled && el.vlmEnabled.checked);
   }
 
   function setOutput({ overlay, speech, meta }) {
@@ -454,22 +431,8 @@
     const mouseMode = localStorage.getItem('aituber.stage.mouseMode') || 'no_follow';
     if (el.mouseMode) el.mouseMode.value = mouseMode === 'no_input' ? 'no_input' : 'no_follow';
 
-    const vadEnabled = localStorage.getItem('aituber.stt.vadEnabled');
-    if (el.vadEnabled) el.vadEnabled.checked = vadEnabled !== '0';
-    if (el.vadThreshold) {
-      el.vadThreshold.value = localStorage.getItem('aituber.stt.vadThreshold') || '0.005';
-    }
-    if (el.vadAggressiveness) {
-      el.vadAggressiveness.value = localStorage.getItem('aituber.stt.vadAggressiveness') || '1';
-    }
-    if (el.vadPaddingMs) {
-      el.vadPaddingMs.value = localStorage.getItem('aituber.stt.vadPaddingMs') || '700';
-    }
-    if (el.vadMinSpeechMs) {
-      el.vadMinSpeechMs.value = localStorage.getItem('aituber.stt.vadMinSpeechMs') || '350';
-    }
-    if (el.vadFrameMs) {
-      el.vadFrameMs.value = localStorage.getItem('aituber.stt.vadFrameMs') || '30';
+    if (el.whisperDevice) {
+      el.whisperDevice.value = localStorage.getItem('aituber.whisper_device') || 'cpu';
     }
     if (el.vlmEnabled) {
       el.vlmEnabled.checked = localStorage.getItem('aituber.vlm.enabled') === '1';
@@ -481,13 +444,9 @@
       el.shortTermMaxEvents.value = localStorage.getItem('aituber.rag.shortTermMaxEvents') || '50';
     }
 
-    if (el.sttProvider) el.sttProvider.value = localStorage.getItem('aituber.provider.stt') || 'local';
-    // Coerce stale values (e.g. 'openai') to supported providers.
-    if (el.sttProvider) el.sttProvider.value = normalizeSttProvider(el.sttProvider.value);
-    if (el.llmProvider) el.llmProvider.value = localStorage.getItem('aituber.provider.llm') || 'gemini';
-    if (el.ttsProvider) el.ttsProvider.value = localStorage.getItem('aituber.provider.tts') || 'google';
-    if (el.providerPreset) el.providerPreset.value = localStorage.getItem('aituber.provider.preset') || '';
-    syncPresetFromProviders();
+    if (el.whisperDevice) {
+      el.whisperDevice.value = getWhisperDevice();
+    }
   }
 
   function savePrefs() {
@@ -497,35 +456,8 @@
     if (el.mouseMode) {
       localStorage.setItem('aituber.stage.mouseMode', String(el.mouseMode.value || 'no_follow'));
     }
-    if (el.vadEnabled) {
-      localStorage.setItem('aituber.stt.vadEnabled', el.vadEnabled.checked ? '1' : '0');
-    }
-    if (el.vadThreshold) {
-      localStorage.setItem('aituber.stt.vadThreshold', String(el.vadThreshold.value || '0.005'));
-    }
-    if (el.vadAggressiveness) {
-      localStorage.setItem('aituber.stt.vadAggressiveness', String(el.vadAggressiveness.value || '1'));
-    }
-    if (el.vadPaddingMs) {
-      localStorage.setItem('aituber.stt.vadPaddingMs', String(el.vadPaddingMs.value || '700'));
-    }
-    if (el.vadMinSpeechMs) {
-      localStorage.setItem('aituber.stt.vadMinSpeechMs', String(el.vadMinSpeechMs.value || '350'));
-    }
-    if (el.vadFrameMs) {
-      localStorage.setItem('aituber.stt.vadFrameMs', String(el.vadFrameMs.value || '30'));
-    }
-    if (el.sttProvider) {
-      localStorage.setItem('aituber.provider.stt', String(el.sttProvider.value || 'local'));
-    }
-    if (el.llmProvider) {
-      localStorage.setItem('aituber.provider.llm', String(el.llmProvider.value || 'gemini'));
-    }
-    if (el.ttsProvider) {
-      localStorage.setItem('aituber.provider.tts', String(el.ttsProvider.value || 'google'));
-    }
-    if (el.providerPreset) {
-      localStorage.setItem('aituber.provider.preset', String(el.providerPreset.value || ''));
+    if (el.whisperDevice) {
+      localStorage.setItem('aituber.whisper_device', getWhisperDevice());
     }
   }
 
@@ -754,7 +686,7 @@
     }
     audioProcessor = null;
     audioSource = null;
-    pcmChunks = [];
+    _resetSttSegmentation();
 
     try {
       if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
@@ -777,6 +709,7 @@
     }
     // Clear previous recognition immediately when starting.
     resetSttBuffer();
+    _resetSttSegmentation();
 
     // WebAudio PCM capture -> WAV (no ffmpeg required)
     if (!window.AudioContext && !window.webkitAudioContext) {
@@ -795,10 +728,68 @@
     audioProcessor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
     pcmChunks = [];
 
+    // Segmentation params
+    const VOICE_RMS_THRESHOLD = 0.006;
+    const SILENCE_MS = 700;
+    const MIN_UTTERANCE_MS = 350;
+    const MAX_UTTERANCE_MS = 12000;
+    const PRE_ROLL_MS = 350;
+    const preRollMaxSamples = Math.max(0, Math.floor(pcmSampleRate * (PRE_ROLL_MS / 1000)));
+
+    function pushPreRoll(chunk) {
+      if (!preRollMaxSamples) return;
+      sttPreRollChunks.push(chunk);
+      sttPreRollSamples += chunk.length;
+      while (sttPreRollSamples > preRollMaxSamples && sttPreRollChunks.length) {
+        const dropped = sttPreRollChunks.shift();
+        sttPreRollSamples -= dropped ? dropped.length : 0;
+      }
+    }
+
+    async function flushUtterance(reason) {
+      if (!el.sttEnabled || !el.sttEnabled.checked) return;
+      if (sttBusy) return;
+      if (!sttSpeechStarted) return;
+      if (!sttUtteranceChunks.length) return;
+
+      const utteranceMs = (sttUtteranceSamples / pcmSampleRate) * 1000;
+      if (utteranceMs < MIN_UTTERANCE_MS) {
+        _resetSttSegmentation();
+        return;
+      }
+
+      const chunks = sttUtteranceChunks;
+      _resetSttSegmentation();
+      if (el.speechStatus) el.speechStatus.textContent = `STT: sending (${reason || 'silence'})...`;
+      const wav = encodeWavFloat32Mono(chunks, pcmSampleRate);
+      await postSttWavAndSubmit(wav);
+    }
+
     audioProcessor.onaudioprocess = (e) => {
       if (!el.sttEnabled || !el.sttEnabled.checked) return;
       const input = e.inputBuffer.getChannelData(0);
-      pcmChunks.push(new Float32Array(input));
+      const chunk = new Float32Array(input);
+      const now = performance.now();
+      const rms = _rmsOfFloat32(chunk);
+
+      if (rms >= VOICE_RMS_THRESHOLD) {
+        sttLastVoiceAt = now;
+        if (!sttSpeechStarted) {
+          sttSpeechStarted = true;
+          sttSpeechStartAt = now;
+          sttUtteranceChunks = sttPreRollChunks.slice();
+          sttUtteranceSamples = sttPreRollSamples;
+          sttPreRollChunks = [];
+          sttPreRollSamples = 0;
+        }
+      }
+
+      if (sttSpeechStarted) {
+        sttUtteranceChunks.push(chunk);
+        sttUtteranceSamples += chunk.length;
+      } else {
+        pushPreRoll(chunk);
+      }
     };
 
     // Keep processor alive.
@@ -808,22 +799,30 @@
     audioProcessor.connect(gain);
     gain.connect(audioCtx.destination);
 
-    async function flushChunk() {
+    async function tickSegmentation() {
       if (!el.sttEnabled || !el.sttEnabled.checked) return;
-      if (sttBusy) return;
-      if (!pcmChunks.length) return;
+      if (!sttSpeechStarted) return;
+      const now = performance.now();
+      const sinceVoice = now - (sttLastVoiceAt || sttSpeechStartAt || now);
+      const utteranceMs = (sttUtteranceSamples / pcmSampleRate) * 1000;
 
-      // Take snapshot and clear
-      const chunks = pcmChunks;
-      pcmChunks = [];
-      const wav = encodeWavFloat32Mono(chunks, pcmSampleRate);
-      await postSttWavAndSubmit(wav);
+      if (utteranceMs >= MAX_UTTERANCE_MS) {
+        await flushUtterance('max_len');
+        return;
+      }
+      if (sinceVoice >= SILENCE_MS) {
+        await flushUtterance('silence');
+      }
     }
 
-    // Send chunk every ~0.8s for all providers.
-    // For google, this behaves like pseudo-streaming (repeated non-stream requests).
-    sttTimer = setInterval(flushChunk, 800);
-    el.speechStatus.textContent = isGoogleStt() ? 'STT: recording started (google, chunked).' : 'STT: recording started (streaming).';
+    // Check frequently; actual POST is gated by sttBusy.
+    sttTimer = setInterval(() => {
+      void tickSegmentation();
+    }, 200);
+    el.speechStatus.textContent = 'STT: recording started.';
+
+    // Warm up the Whisper model in the background (prevents first request from feeling stuck).
+    warmupStt();
   }
 
   async function loadHotkeysAndRenderSelect() {
@@ -876,10 +875,11 @@
     const turnsToPrompt = toInt(el.shortTermTurnsToPrompt && el.shortTermTurnsToPrompt.value);
 
     return {
+      // Providers are intentionally locked for this workflow.
       providers: {
-        stt: getSttProvider(),
-        llm: getLlmProvider(),
-        tts: getTtsProvider(),
+        stt: 'local',
+        llm: 'gemini',
+        tts: 'google',
       },
       llm: {
         system_prompt: String((el.llmSystemPrompt && el.llmSystemPrompt.value) || ''),
@@ -927,10 +927,6 @@
 
   function applySettings(settings) {
     const s = settings || {};
-    const providers = s.providers || {};
-    if (el.sttProvider) el.sttProvider.value = normalizeSttProvider(String(providers.stt || 'local'));
-    if (el.llmProvider) el.llmProvider.value = String(providers.llm || 'gemini');
-    if (el.ttsProvider) el.ttsProvider.value = String(providers.tts || 'google');
 
     const llm = s.llm || {};
     if (el.llmSystemPrompt) el.llmSystemPrompt.value = String(llm.system_prompt || '');
@@ -968,7 +964,6 @@
       if (j && j.ok) {
         applySettings(j.settings || {});
         if (el.saveAllStatus) setStatusEl(el.saveAllStatus, 'loaded');
-        syncPresetFromProviders();
       } else if (el.saveAllStatus) {
         setStatusEl(el.saveAllStatus, `load failed: ${(j && j.error) || 'unknown'}`);
       }
@@ -1220,60 +1215,9 @@
       };
     }
 
-    if (el.vadEnabled) {
-      el.vadEnabled.onchange = () => {
-        try {
-          localStorage.setItem('aituber.stt.vadEnabled', el.vadEnabled.checked ? '1' : '0');
-        } catch {
-          // ignore
-        }
-      };
-    }
-
-    if (el.vadThreshold) {
-      el.vadThreshold.onchange = () => {
-        try {
-          localStorage.setItem('aituber.stt.vadThreshold', String(el.vadThreshold.value || '0.01'));
-        } catch {
-          // ignore
-        }
-      };
-    }
-
-    if (el.vadAggressiveness) {
-      el.vadAggressiveness.onchange = () => {
-        try {
-          localStorage.setItem('aituber.stt.vadAggressiveness', String(el.vadAggressiveness.value || '1'));
-        } catch {
-          // ignore
-        }
-      };
-    }
-    if (el.vadPaddingMs) {
-      el.vadPaddingMs.onchange = () => {
-        try {
-          localStorage.setItem('aituber.stt.vadPaddingMs', String(el.vadPaddingMs.value || '700'));
-        } catch {
-          // ignore
-        }
-      };
-    }
-    if (el.vadMinSpeechMs) {
-      el.vadMinSpeechMs.onchange = () => {
-        try {
-          localStorage.setItem('aituber.stt.vadMinSpeechMs', String(el.vadMinSpeechMs.value || '350'));
-        } catch {
-          // ignore
-        }
-      };
-    }
-    if (el.vadFrameMs) {
-      el.vadFrameMs.onchange = () => {
-        try {
-          localStorage.setItem('aituber.stt.vadFrameMs', String(el.vadFrameMs.value || '30'));
-        } catch {
-          // ignore
-        }
+    if (el.whisperDevice) {
+      el.whisperDevice.onchange = () => {
+        savePrefs();
       };
     }
 
@@ -1284,40 +1228,6 @@
         } catch {
           // ignore
         }
-      };
-    }
-
-    if (el.providerPreset) {
-      el.providerPreset.onchange = () => {
-        const key = String(el.providerPreset.value || '').trim();
-        if (key) applyProviderPreset(key);
-        savePrefs();
-        syncPresetFromProviders();
-        syncProvidersToEnv();
-      };
-    }
-
-    if (el.sttProvider) {
-      el.sttProvider.onchange = () => {
-        savePrefs();
-        syncPresetFromProviders();
-        syncProvidersToEnv();
-      };
-    }
-
-    if (el.llmProvider) {
-      el.llmProvider.onchange = () => {
-        savePrefs();
-        syncPresetFromProviders();
-        syncProvidersToEnv();
-      };
-    }
-
-    if (el.ttsProvider) {
-      el.ttsProvider.onchange = () => {
-        savePrefs();
-        syncPresetFromProviders();
-        syncProvidersToEnv();
       };
     }
 

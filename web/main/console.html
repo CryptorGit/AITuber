@@ -126,6 +126,12 @@
           <div class="muted">ONで 選択マイクを録音 → /stt/audio → /events</div>
         </div>
 
+        <label>Whisper device</label>
+        <select id="whisperDevice">
+          <option value="cpu">cpu</option>
+          <option value="gpu">gpu</option>
+        </select>
+
         <label>Live2D モデル選択（/web/models 配下）</label>
         <div style="display:flex; gap:8px; align-items:center; margin-top:6px">
           <button id="browseModelFolder" type="button">フォルダ参照…</button>
@@ -175,63 +181,12 @@
       </div>
 
       <div class="card">
-        <h2>Providers</h2>
-        <label>Preset</label>
-        <select id="providerPreset">
-          <option value="">(manual)</option>
-          <option value="local">local (whisper + gemini + google)</option>
-          <option value="google">google (stt + gemini + google)</option>
-        </select>
-        <div class="muted">Applies to /stt/audio and /web/submit only.</div>
-
-        <label style="margin-top:12px">STT provider</label>
-        <select id="sttProvider">
-          <option value="google">google (Cloud Speech-to-Text)</option>
-          <option value="local">local (faster-whisper)</option>
-        </select>
-
-        <label style="margin-top:12px">LLM provider</label>
-        <select id="llmProvider" disabled>
-          <option value="gemini">gemini</option>
-        </select>
-
-        <label style="margin-top:12px">TTS provider</label>
-        <select id="ttsProvider" disabled>
-          <option value="google">google</option>
-        </select>
-      </div>
-
-      <div class="card">
         <h2>入力 / 出力</h2>
         <label>入力（保持しません）</label>
         <textarea id="manualText" placeholder="ここに入力 → 送信"></textarea>
         <button id="sendManual">送信（カメラ→VLM, 入力→LLM）</button>
 
         <h3>STT</h3>
-        <label>VAD</label>
-        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
-          <input id="vadEnabled" type="checkbox" style="width:auto; margin:0" />
-          <div class="muted">無音判定を有効</div>
-        </div>
-        <label>VAD threshold</label>
-        <input id="vadThreshold" type="number" min="0" max="0.2" step="0.005" />
-        <div class="muted">例: 0.01〜0.02（無音での誤爆を抑制）</div>
-
-        <label>WebRTC VAD aggressiveness</label>
-        <input id="vadAggressiveness" type="number" min="0" max="3" step="1" />
-        <div class="muted">0=ゆるい / 3=厳しい（途切れるなら下げる）</div>
-
-        <label>WebRTC VAD padding (ms)</label>
-        <input id="vadPaddingMs" type="number" min="0" max="1500" step="50" />
-        <div class="muted">途切れるなら上げる（例: 500〜900）</div>
-
-        <label>WebRTC VAD min speech (ms)</label>
-        <input id="vadMinSpeechMs" type="number" min="0" max="2000" step="50" />
-        <div class="muted">短いノイズを弾く（例: 300〜500）</div>
-
-        <label>WebRTC VAD frame (ms)</label>
-        <input id="vadFrameMs" type="number" min="10" max="30" step="10" />
-        <div class="muted">10/20/30 のみ（迷ったら30）</div>
         <div class="muted" id="speechStatus"></div>
 
         <label>STT streaming</label>

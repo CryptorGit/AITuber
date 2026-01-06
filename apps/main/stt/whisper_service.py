@@ -40,6 +40,7 @@ def transcribe_pcm(
     audio: np.ndarray,
     sample_rate: int,
     cfg: WhisperConfig,
+    internal_vad: bool = True,
 ) -> str:
     """Transcribe mono float32 PCM audio.
 
@@ -61,7 +62,7 @@ def transcribe_pcm(
     segments, _info = model.transcribe(
         audio,
         language=cfg.language or None,
-        vad_filter=True,
+        vad_filter=bool(internal_vad),
     )
     text = "".join((s.text or "") for s in segments).strip()
     return text

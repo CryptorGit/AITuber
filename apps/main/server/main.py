@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import json
 import re
 import threading
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+import anyio
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.responses import JSONResponse
@@ -34,9 +36,6 @@ from apps.main.tts.service import TTSService
 from apps.main.vlm.screenshot import ScreenshotCapturer
 from apps.main.vlm.summarizer import VLMSummarizer
 from apps.main.llm.gemini_mvp import GeminiMVP
-from apps.main.llm.openai_chat import OpenAIChatMVP
-from apps.main.stt.google_service import GoogleSTTConfig, transcribe_wav_via_google
-from apps.main.stt.webrtc_vad import webrtc_vad_filter
 from apps.main.stt.whisper_service import WhisperConfig, transcribe_pcm, get_model
 
 
@@ -86,14 +85,7 @@ def _load_app_yaml(path: Path) -> Dict[str, Any]:
 
 
 def _get_vlm_system_prompt(*, settings: Settings, appcfg: Dict[str, Any]) -> str:
-    """Get VLM system prompt from persisted settings or config/prompts fallback."""
-    try:
-        lt = _get_long_term_store(settings=settings, appcfg=appcfg)
-        txt = _get_long_term_doc_text(lt, doc_id="system_vlm")
-        if (txt or "").strip():
-            return str(txt)
-    except Exception:
-        pass
+    """Get VLM system prompt from console settings."""
     return read_prompt_text(name="vlm_system")
 
 
@@ -211,6 +203,25 @@ def _get_long_term_store(*, settings: Settings, appcfg: Dict[str, Any]) -> LongT
     return LongTermStore(db_path=db_path)
 
 
+def _purge_legacy_long_term_docs(*, settings: Settings, appcfg: Dict[str, Any]) -> None:
+    """Remove legacy LongTerm docs that were previously (mis)used for console settings.
+
+    The current system uses data/config/console_settings.json as the single source of truth.
+    """
+    try:
+        db_path = Path(appcfg.get("rag", {}).get("long_term_db_path", settings.data_dir / "rag/long_term.sqlite"))
+        if not db_path.exists():
+            return
+        lt = LongTermStore(db_path=db_path)
+        for doc_id in ("system_llm", "settings_llm", "system_vlm", "settings_vlm"):
+            try:
+                lt.delete(doc_id=doc_id)
+            except Exception:
+                continue
+    except Exception:
+        return
+
+
 def _rag_items_db_path(settings: Settings) -> Path:
     return settings.data_dir / "rag" / "rag_items.sqlite"
 
@@ -219,34 +230,15 @@ def _turns_db_path(settings: Settings) -> Path:
     return settings.data_dir / "rag" / "short_term_turns.sqlite"
 
 
-def _get_long_term_doc_text(lt: LongTermStore, *, doc_id: str) -> str:
-    try:
-        doc = lt.get(doc_id=doc_id)
-        if isinstance(doc, dict):
-            return str(doc.get("text") or "")
-    except Exception:
-        pass
-    return ""
-
-
-def _get_long_term_doc_json(lt: LongTermStore, *, doc_id: str) -> Dict[str, Any]:
-    raw = _get_long_term_doc_text(lt, doc_id=doc_id).strip()
-    if not raw:
-        return {}
-    try:
-        obj = json.loads(raw)
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
-
-
 def _make_llm_and_vlm(
     *, settings: Settings, lt: LongTermStore, llm_provider: Optional[str] = None
 ) -> tuple[Any, VLMSummarizer]:
-    llm_sys = _get_long_term_doc_text(lt, doc_id="system_llm").strip()
-    vlm_sys = _get_long_term_doc_text(lt, doc_id="system_vlm").strip()
-    llm_cfg = dict(_get_long_term_doc_json(lt, doc_id="settings_llm") or {})
-    vlm_cfg = dict(_get_long_term_doc_json(lt, doc_id="settings_vlm") or {})
+    # LLM/VLM config is sourced from the web console (console_settings.json).
+    # Do not read or persist these settings in LongTermStore.
+    llm_sys = ""
+    vlm_sys = ""
+    llm_cfg: Dict[str, Any] = {}
+    vlm_cfg: Dict[str, Any] = {}
 
     console_cfg = _load_console_settings(settings)
     llm_console = console_cfg.get("llm")
@@ -282,6 +274,11 @@ def _make_llm_and_vlm(
             if max_tokens is not None:
                 vlm_cfg["max_output_tokens"] = max_tokens
 
+    if not llm_sys:
+        llm_sys = read_prompt_text(name="llm_system").strip()
+    if not vlm_sys:
+        vlm_sys = read_prompt_text(name="vlm_system").strip()
+
     vlm_model = str(vlm_cfg.get("model") or settings.gemini_model).strip() or settings.gemini_model
 
     llm_gen: Dict[str, Any] = {}
@@ -301,23 +298,13 @@ def _make_llm_and_vlm(
     if "thinking_config" not in vlm_gen:
         vlm_gen["thinking_config"] = {"thinking_budget": 0}
 
-    prov = (llm_provider or settings.llm_provider or "gemini").strip().lower()
-    if prov == "openai":
-        llm_model = str(llm_cfg.get("model") or settings.openai_model).strip() or settings.openai_model
-        llm = OpenAIChatMVP(
-            api_key=settings.openai_api_key,
-            model=llm_model,
-            system_prompt=llm_sys or None,
-            generation_config=llm_gen or None,
-        )
-    else:
-        llm_model = str(llm_cfg.get("model") or settings.gemini_model).strip() or settings.gemini_model
-        llm = GeminiMVP(
-            api_key=settings.gemini_api_key,
-            model=llm_model,
-            system_prompt=llm_sys or None,
-            generation_config=llm_gen or None,
-        )
+    llm_model = str(llm_cfg.get("model") or settings.gemini_model).strip() or settings.gemini_model
+    llm = GeminiMVP(
+        api_key=settings.gemini_api_key,
+        model=llm_model,
+        system_prompt=llm_sys or None,
+        generation_config=llm_gen or None,
+    )
     vlm = VLMSummarizer(api_key=settings.gemini_api_key, model=vlm_model, system_prompt=vlm_sys or None, generation_config=vlm_gen or None)
     return llm, vlm
 
@@ -922,6 +909,7 @@ class STTAudioOut(BaseModel):
     error: Optional[str] = None
     vlm_summary: Optional[str] = None
     timing_ms: Optional[Dict[str, Any]] = None
+    debug: Optional[Dict[str, Any]] = None
 
 
 class MotionIn(BaseModel):
@@ -938,7 +926,7 @@ class WebSubmitIn(BaseModel):
 
 
 class ProviderUpdateIn(BaseModel):
-    stt_provider: Optional[str] = None
+    # STT is hard-locked to local faster-whisper (large-v3-turbo).
     llm_provider: Optional[str] = None
     tts_provider: Optional[str] = None
 
@@ -961,16 +949,16 @@ def _startup() -> None:
     (settings.data_dir / "manager").mkdir(parents=True, exist_ok=True)
     (settings.data_dir / "obs").mkdir(parents=True, exist_ok=True)
     try:
-        import os
-
-        provider = (os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
-        if settings.stt_enabled and provider in ("local", "whisper", "faster-whisper"):
-            model_name = _normalize_whisper_model_name(
-                os.getenv("AITUBER_WHISPER_MODEL") or settings.whisper_model
-            )
-            compute_type = (os.getenv("AITUBER_WHISPER_COMPUTE_TYPE") or settings.whisper_compute_type or "int8").strip() or "int8"
-            device = (os.getenv("AITUBER_WHISPER_DEVICE") or settings.whisper_device or "cpu").strip() or "cpu"
-            cfg = WhisperConfig(model=model_name, device=device, compute_type=compute_type, language="ja")
+        appcfg = _load_app_yaml(Path("config/main/app.yaml"))
+        _purge_legacy_long_term_docs(settings=settings, appcfg=appcfg)
+    except Exception:
+        pass
+    try:
+        if settings.stt_enabled:
+            device = (settings.whisper_device or "cpu").strip() or "cpu"
+            device = "cuda" if device.lower() in ("cuda", "gpu") else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+            cfg = WhisperConfig(model="large-v3-turbo", device=device, compute_type=compute_type, language="ja")
             get_model(cfg)
     except Exception:
         pass
@@ -1128,9 +1116,8 @@ def _normalize_console_settings_payload(payload: Dict[str, Any]) -> Dict[str, An
 
     providers_in = payload.get("providers")
     if isinstance(providers_in, dict):
+        # Keep only LLM/TTS; STT is hard-locked to local whisper-turbo.
         providers: Dict[str, Any] = {}
-        if "stt" in providers_in:
-            providers["stt"] = str(providers_in.get("stt") or "").strip().lower()
         if "llm" in providers_in:
             providers["llm"] = str(providers_in.get("llm") or "").strip().lower()
         if "tts" in providers_in:
@@ -1207,9 +1194,6 @@ def config_save_all(payload: Dict[str, Any]) -> Dict[str, Any]:
     updates: Dict[str, str] = {}
     providers = cleaned.get("providers")
     if isinstance(providers, dict):
-        stt = str(providers.get("stt") or "").strip().lower()
-        if stt:
-            updates["AITUBER_STT_PROVIDER"] = stt
         llm = str(providers.get("llm") or "").strip().lower()
         if llm:
             updates["AITUBER_LLM_PROVIDER"] = llm
@@ -1222,55 +1206,6 @@ def config_save_all(payload: Dict[str, Any]) -> Dict[str, Any]:
         for key, value in updates.items():
             os.environ[key] = value
 
-    lt = _get_long_term_store(settings=settings, appcfg=appcfg)
-    llm_cfg = cleaned.get("llm")
-    if isinstance(llm_cfg, dict):
-        if "system_prompt" in llm_cfg:
-            lt.upsert(
-                doc_id="system_llm",
-                text=str(llm_cfg.get("system_prompt") or ""),
-                source="console",
-                created_at=utc_iso(),
-            )
-        llm_settings: Dict[str, Any] = {}
-        if "model" in llm_cfg:
-            llm_settings["model"] = llm_cfg.get("model")
-        if llm_cfg.get("temperature") is not None:
-            llm_settings["temperature"] = llm_cfg.get("temperature")
-        if llm_cfg.get("max_output_tokens") is not None:
-            llm_settings["max_output_tokens"] = llm_cfg.get("max_output_tokens")
-        if llm_settings:
-            lt.upsert(
-                doc_id="settings_llm",
-                text=json.dumps(llm_settings, ensure_ascii=False),
-                source="console",
-                created_at=utc_iso(),
-            )
-
-    vlm_cfg = cleaned.get("vlm")
-    if isinstance(vlm_cfg, dict):
-        if "system_prompt" in vlm_cfg:
-            lt.upsert(
-                doc_id="system_vlm",
-                text=str(vlm_cfg.get("system_prompt") or ""),
-                source="console",
-                created_at=utc_iso(),
-            )
-        vlm_settings: Dict[str, Any] = {}
-        if "model" in vlm_cfg:
-            vlm_settings["model"] = vlm_cfg.get("model")
-        if vlm_cfg.get("temperature") is not None:
-            vlm_settings["temperature"] = vlm_cfg.get("temperature")
-        if vlm_cfg.get("max_output_tokens") is not None:
-            vlm_settings["max_output_tokens"] = vlm_cfg.get("max_output_tokens")
-        if vlm_settings:
-            lt.upsert(
-                doc_id="settings_vlm",
-                text=json.dumps(vlm_settings, ensure_ascii=False),
-                source="console",
-                created_at=utc_iso(),
-            )
-
     return {"ok": True}
 
 
@@ -1278,30 +1213,23 @@ def config_save_all(payload: Dict[str, Any]) -> Dict[str, Any]:
 def config_load_all() -> Dict[str, Any]:
     settings = load_settings()
     appcfg = _load_app_yaml(Path("config/main/app.yaml"))
-    lt = _get_long_term_store(settings=settings, appcfg=appcfg)
     raw = _load_console_settings(settings)
 
     # Providers are intentionally locked for this workflow:
     # - LLM: Gemini
     # - TTS: Google Cloud TTS
-    providers_raw = raw.get("providers") if isinstance(raw, dict) else {}
     providers: Dict[str, Any] = {
-        "stt": str(providers_raw.get("stt") or settings.stt_provider or "local")
-        if "stt" not in providers_raw
-        else str(providers_raw.get("stt") or ""),
+        "stt": "local",  # hard-locked to faster-whisper large-v3-turbo
         "llm": "gemini",
         "tts": "google",
     }
 
     llm_raw = raw.get("llm") if isinstance(raw, dict) else {}
-    llm_store = _get_long_term_doc_json(lt, doc_id="settings_llm")
     llm_sys = (
         str(llm_raw.get("system_prompt") or "")
         if isinstance(llm_raw, dict) and "system_prompt" in llm_raw
-        else _get_long_term_doc_text(lt, doc_id="system_llm")
+        else ""
     )
-    if not (llm_sys or "").strip():
-        llm_sys = read_prompt_text(name="llm_system")
     llm_char = (
         str(llm_raw.get("character_prompt") or "")
         if isinstance(llm_raw, dict) and "character_prompt" in llm_raw
@@ -1312,48 +1240,45 @@ def config_load_all() -> Dict[str, Any]:
     llm_model = (
         llm_raw.get("model")
         if isinstance(llm_raw, dict) and "model" in llm_raw
-        else llm_store.get("model") or default_llm_model
+        else default_llm_model
     )
     llm_temp = (
         llm_raw.get("temperature")
         if isinstance(llm_raw, dict) and "temperature" in llm_raw and llm_raw.get("temperature") is not None
-        else llm_store.get("temperature")
+        else None
     )
     if llm_temp is None:
         llm_temp = 0.7
     llm_max_tokens = (
         llm_raw.get("max_output_tokens")
         if isinstance(llm_raw, dict) and "max_output_tokens" in llm_raw and llm_raw.get("max_output_tokens") is not None
-        else llm_store.get("max_output_tokens")
+        else None
     )
     if llm_max_tokens is None:
         llm_max_tokens = 2048
 
     vlm_raw = raw.get("vlm") if isinstance(raw, dict) else {}
-    vlm_store = _get_long_term_doc_json(lt, doc_id="settings_vlm")
     vlm_sys = (
         str(vlm_raw.get("system_prompt") or "")
         if isinstance(vlm_raw, dict) and "system_prompt" in vlm_raw
-        else _get_long_term_doc_text(lt, doc_id="system_vlm")
+        else ""
     )
-    if not (vlm_sys or "").strip():
-        vlm_sys = read_prompt_text(name="vlm_system")
     vlm_model = (
         vlm_raw.get("model")
         if isinstance(vlm_raw, dict) and "model" in vlm_raw
-        else vlm_store.get("model") or settings.gemini_model
+        else settings.gemini_model
     )
     vlm_temp = (
         vlm_raw.get("temperature")
         if isinstance(vlm_raw, dict) and "temperature" in vlm_raw and vlm_raw.get("temperature") is not None
-        else vlm_store.get("temperature")
+        else None
     )
     if vlm_temp is None:
         vlm_temp = 0.2
     vlm_max_tokens = (
         vlm_raw.get("max_output_tokens")
         if isinstance(vlm_raw, dict) and "max_output_tokens" in vlm_raw and vlm_raw.get("max_output_tokens") is not None
-        else vlm_store.get("max_output_tokens")
+        else None
     )
     if vlm_max_tokens is None:
         vlm_max_tokens = 256
@@ -1427,35 +1352,7 @@ def tts_health() -> Dict[str, Any]:
     except Exception as e:
         return {"ok": False, "provider": "google", "error": f"{type(e).__name__}: {e}"[:200]}
 
-@app.post("/config/providers")
-def config_providers(req: ProviderUpdateIn) -> Dict[str, Any]:
-    import os
 
-    updates: Dict[str, str] = {}
-
-    stt = (req.stt_provider or "").strip().lower()
-    if stt in ("local", "google"):
-        updates["AITUBER_STT_PROVIDER"] = stt
-
-    llm = (req.llm_provider or "").strip().lower()
-    if llm in ("gemini",):
-        updates["AITUBER_LLM_PROVIDER"] = "gemini"
-
-    tts = (req.tts_provider or "").strip().lower()
-    if tts in ("google",):
-        updates["AITUBER_TTS_PROVIDER"] = "google"
-
-    if not updates:
-        return {"ok": False, "error": "no_valid_updates"}
-
-    env_path = _resolve_env_file()
-    if not _update_env_vars(env_path, updates):
-        return {"ok": False, "error": "write_failed"}
-
-    for key, value in updates.items():
-        os.environ[key] = value
-
-    return {"ok": True, "updated": list(updates.keys())}
 
 
 @app.get("/rag/short_term/recent")
@@ -1505,8 +1402,6 @@ def rag_long_term_list(limit: int = 200) -> Dict[str, Any]:
     db_path = Path(appcfg.get("rag", {}).get("long_term_db_path", settings.data_dir / "rag/long_term.sqlite"))
     lt = LongTermStore(db_path=db_path)
     items = lt.list(limit=limit)
-    hidden = {"system_llm", "settings_llm", "system_vlm", "settings_vlm"}
-    items = [it for it in items if str(it.get("doc_id") or "") not in hidden]
     return {"ok": True, "items": items}
 
 
@@ -1815,15 +1710,17 @@ def _split_sentences(text: str) -> tuple[list[str], str]:
 
 def _build_stream_prompt(*, user_text: str, rag_context: str, vlm_summary: str, system_prompt: str) -> tuple[str, str]:
     sys = (system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
-    prompt = (
-        "次の入力と文脈を踏まえて、日本語で自然に返答してください。\n"
-        "- 返答はそのまま字幕/音声に使います（要約しない）\n"
-        "- できるだけ早く返事を開始できるよう、短い文から書き始めてください\n"
-        "- 改行しても良い\n\n"
-        f"user_text: {user_text}\n\n"
-        f"vlm_summary: {vlm_summary}\n\n"
-        f"rag_context:\n{rag_context}\n"
-    )
+    parts: list[str] = []
+    ut = (user_text or "").strip()
+    if ut:
+        parts.append(ut)
+    vs = (vlm_summary or "").strip()
+    if vs:
+        parts.append("[VLM]\n" + vs)
+    rc = (rag_context or "").strip()
+    if rc:
+        parts.append("[RAG]\n" + rc)
+    prompt = "\n\n".join([p for p in parts if p]).strip()
     return sys, prompt
 
 
@@ -1837,34 +1734,6 @@ def _stream_llm_text(
 ) -> str:
     """Best-effort streaming: returns full text, but yields early through state updates in the caller."""
     prov = (llm_provider or "").strip().lower() or "gemini"
-    if prov == "openai":
-        try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=settings.openai_api_key, timeout=20.0)
-            stream = client.chat.completions.create(
-                model=settings.openai_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                stream=True,
-                max_tokens=max_tokens,
-            )
-            chunks: list[str] = []
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-                content = ""
-                if isinstance(delta, dict):
-                    content = delta.get("content") or ""
-                else:
-                    content = getattr(delta, "content", "") or ""
-                if content:
-                    chunks.append(content)
-            return "".join(chunks)
-        except Exception:
-            return "了解。"
-
     # Gemini fallback (non-stream or SDK-dependent stream)
     if not (settings.gemini_api_key or "").strip():
         return "（Gemini APIキー未設定: フォールバック）"
@@ -2554,17 +2423,11 @@ def stt_text(req: STTIn) -> Dict[str, Any]:
 async def stt_audio(
     file: UploadFile = File(...),
     lang: str = Form(default="ja-JP"),
-    vad_enabled: str = Form(default="1"),
-    vad_threshold: float = Form(default=0.01),
-    vad_aggressiveness: int = Form(default=1),
-    vad_padding_ms: int = Form(default=700),
-    vad_min_speech_ms: int = Form(default=350),
-    vad_frame_ms: int = Form(default=30),
-    stt_provider: str = Form(default=""),
+    whisper_device: str = Form(default="cpu"),
     stt_enabled: str = Form(default="1"),
     vlm_force: str = Form(default="0"),
 ) -> Dict[str, Any]:
-    """Transcribe microphone audio into text using local Whisper or Google.
+    """Transcribe microphone audio into text using local faster-whisper.
 
     Expected input: WAV (PCM) from the browser.
     """
@@ -2607,80 +2470,30 @@ async def stt_audio(
     except Exception as e:
         return STTAudioOut(ok=False, text="", error=f"invalid_wav:{type(e).__name__}"[:200]).model_dump(mode="json")
 
-    # Optional VAD (skip Whisper on silence)
-    vad_on = _parse_bool_flag(vad_enabled, default=True)
+    # Quick audio stats for diagnostics + safe silence gating.
     try:
-        vad_thr = float(vad_threshold)
+        max_amp = float(np.max(np.abs(audio))) if getattr(audio, "size", 0) else 0.0
+        rms = float(np.sqrt(np.mean(np.square(audio)))) if getattr(audio, "size", 0) else 0.0
+        audio_ms = int((audio.size / float(sr)) * 1000.0) if sr else 0
     except Exception:
-        vad_thr = 0.01
-    vad_thr = max(0.0, min(1.0, vad_thr))
-    if vad_on:
-        # Fast gate (kept for compatibility): if it's extremely quiet, skip early.
-        try:
-            max_amp = float(np.max(np.abs(audio))) if audio.size else 0.0
-        except Exception:
-            max_amp = 0.0
-        if max_amp < vad_thr:
-            return STTAudioOut(ok=False, text="", error="no_voice").model_dump(mode="json")
+        max_amp, rms, audio_ms = 0.0, 0.0, 0
 
-        # WebRTC VAD pre-filter: feed ONLY voiced audio to STT.
-        # If webrtcvad isn't installed, we fall back to the max_amp gate above.
-        try:
-            # Clamp inputs to safe ranges.
-            vad_aggr = int(max(0, min(3, int(vad_aggressiveness))))
-            vad_pad = int(max(0, min(2000, int(vad_padding_ms))))
-            vad_min_ms = int(max(0, min(3000, int(vad_min_speech_ms))))
-            vad_frame = int(vad_frame_ms)
-            if vad_frame not in (10, 20, 30):
-                vad_frame = 30
+    # If it's essentially silence, skip Whisper to avoid hallucinations and reduce load.
+    # Thresholds are intentionally conservative to avoid dropping quiet speech.
+    if audio_ms >= 200 and (max_amp < 0.004 and rms < 0.001):
+        return STTAudioOut(
+            ok=False,
+            text="",
+            error="no_voice",
+            debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms},
+        ).model_dump(mode="json")
 
-            vad_res = webrtc_vad_filter(
-                audio_f32=audio,
-                sample_rate=sr,
-                aggressiveness=vad_aggr,
-                frame_ms=vad_frame,
-                padding_ms=vad_pad,
-                min_speech_ms=vad_min_ms,
-            )
-        except Exception as e:
-            return STTAudioOut(ok=False, text="", error=f"vad_error:{type(e).__name__}").model_dump(mode="json")
-
-        if not vad_res.ok:
-            if vad_res.reason == "missing_dep:webrtcvad":
-                # Dependency missing: keep going with original audio.
-                pass
-            else:
-                # no_voice / empty_audio
-                return STTAudioOut(ok=False, text="", error=vad_res.reason).model_dump(mode="json")
-        else:
-            audio = vad_res.audio_f32
-            sr = int(vad_res.sample_rate)
-            # Re-encode filtered audio for providers expecting WAV bytes.
-            try:
-                import io
-                import wave
-
-                pcm16 = (audio * 32767.0).clip(-32768.0, 32767.0).astype(np.int16).tobytes(order="C")
-                buf = io.BytesIO()
-                with wave.open(buf, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(sr)
-                    wf.writeframes(pcm16)
-                audio_bytes = buf.getvalue()
-            except Exception:
-                # If re-encoding fails, keep original bytes; whisper path still uses float PCM.
-                pass
-
-    import os
-
-    provider = (stt_provider or os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
-    # Backward compat: old configs may still say 'openai'. We do not support OpenAI STT anymore;
-    # fall back to local whisper so web UI keeps working.
-    if provider == "openai":
-        provider = "local"
-    provider_label = "google" if provider == "google" else "whisper"
+    # STT/VAD are hard-locked to faster-whisper (large-v3-turbo) with Whisper's internal VAD.
     language = (lang or "ja-JP").split("-")[0].lower() or "ja"
+    dev = (whisper_device or "cpu").strip().lower()
+    dev = "cuda" if dev in ("cuda", "gpu") else "cpu"
+    compute_type = "float16" if dev == "cuda" else "int8"
+    cfg = WhisperConfig(model="large-v3-turbo", device=dev, compute_type=compute_type, language=language)
 
     force_vlm = _parse_bool_flag(vlm_force, default=False)
     vlm_task = None
@@ -2708,62 +2521,54 @@ async def stt_audio(
 
     text = ""
     chunk_count = 0
-    chunk_sec = 0.0
+    chunk_sec = _clamp_chunk_seconds(settings.stt_chunk_seconds)
     stt_start = time.perf_counter()
-    if provider == "google":
-        chunk_count = 1
-        try:
-            text = await asyncio.to_thread(
-                transcribe_wav_via_google,
-                audio_bytes=audio_bytes,
-                cfg=GoogleSTTConfig(language_code=(lang or "ja-JP")),
-            )
-        except ModuleNotFoundError:
-            return STTAudioOut(ok=False, text="", error="missing_dep:google-cloud-speech").model_dump(mode="json")
-        except ValueError as e:
-            return STTAudioOut(ok=False, text="", error=str(e)[:200]).model_dump(mode="json")
-        except Exception as e:
-            return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
 
-    elif provider == "openai":
-        return STTAudioOut(ok=False, text="", error="stt_provider_unsupported:openai").model_dump(mode="json")
+    # Avoid over-chunking short audio: it hurts accuracy more than it helps.
+    # For longer audio, chunking keeps latency/memory bounded.
+    chunks: list[tuple[int, Any]]
+    if audio_ms and audio_ms <= 6500:
+        chunks = [(0, audio)]
     else:
-        model_name = _normalize_whisper_model_name(
-            os.getenv("AITUBER_WHISPER_MODEL") or settings.whisper_model
-        )
-        compute_type = (os.getenv("AITUBER_WHISPER_COMPUTE_TYPE") or settings.whisper_compute_type or "int8").strip() or "int8"
-        device = (os.getenv("AITUBER_WHISPER_DEVICE") or settings.whisper_device or "cpu").strip() or "cpu"
-        cfg = WhisperConfig(model=model_name, device=device, compute_type=compute_type, language=language)
-        chunk_sec = _clamp_chunk_seconds(os.getenv("AITUBER_STT_CHUNK_SECONDS") or settings.stt_chunk_seconds)
-
-        chunks = []
         try:
             chunks = list(_iter_audio_chunks(audio, sr, chunk_sec))
         except Exception:
             chunks = [(0, audio)]
 
-        texts: list[str] = []
+    texts: list[str] = []
+    try:
         for _idx, chunk in chunks:
-            if not chunk.size:
+            if not getattr(chunk, "size", 0):
                 continue
-            if vad_on:
-                try:
-                    max_amp = float(np.max(np.abs(chunk))) if chunk.size else 0.0
-                except Exception:
-                    max_amp = 0.0
-                if max_amp < vad_thr:
-                    continue
             try:
                 chunk_count += 1
-                part = await asyncio.to_thread(transcribe_pcm, audio=chunk, sample_rate=sr, cfg=cfg)
+                part = await anyio.to_thread.run_sync(
+                    functools.partial(
+                        transcribe_pcm,
+                        audio=chunk,
+                        sample_rate=sr,
+                        cfg=cfg,
+                        internal_vad=True,
+                    ),
+                    abandon_on_cancel=True,
+                )
+            except asyncio.CancelledError:
+                raise
             except ModuleNotFoundError as e:
                 return STTAudioOut(ok=False, text="", error=f"missing_dep:{e.name}").model_dump(mode="json")
             except Exception as e:
                 return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
             if part:
                 texts.append(str(part).strip())
+    except asyncio.CancelledError:
+        if vlm_task is not None:
+            try:
+                vlm_task.cancel()
+            except Exception:
+                pass
+        return STTAudioOut(ok=False, text="", error="canceled").model_dump(mode="json")
 
-        text = " ".join([t for t in texts if t]).strip()
+    text = " ".join([t for t in texts if t]).strip()
 
     stt_end = time.perf_counter()
     _log_phase_timing(
@@ -2774,17 +2579,24 @@ async def stt_audio(
         start=stt_start,
         end=stt_end,
         payload={
-            "provider": provider_label,
+            "provider": "whisper",
             "sr": sr,
-            "audio_ms": int((audio.size / float(sr)) * 1000.0) if sr else 0,
+            "audio_ms": audio_ms,
             "chunk_sec": round(float(chunk_sec), 3) if chunk_sec else None,
             "chunk_count": chunk_count,
+            "whisper": {"model": "large-v3-turbo", "device": dev, "compute_type": compute_type},
+            "audio_stats": {"max_amp": max_amp, "rms": rms},
         },
     )
 
     text = _strip_transcript_phrases(text)
     if not text:
-        return STTAudioOut(ok=False, text="", error="empty_transcript").model_dump(mode="json")
+        return STTAudioOut(
+            ok=False,
+            text="",
+            error="empty_transcript",
+            debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "device": dev},
+        ).model_dump(mode="json")
 
     reason = _should_filter_transcript(text)
     if reason:
@@ -2813,7 +2625,7 @@ async def stt_audio(
                 "source": "stt",
                 "type": "input",
                 "message": text,
-                "payload": {"provider": provider_label, "sr": sr},
+                "payload": {"provider": "whisper", "sr": sr},
                 "pii": {"contains_pii": False, "redacted": True},
             }
         )
@@ -2828,47 +2640,43 @@ async def stt_audio(
             vlm_summary = ""
 
     timing_ms = {"stt_total": int((stt_end - stt_start) * 1000.0)}
-    return STTAudioOut(ok=True, text=text, error=None, vlm_summary=vlm_summary or None, timing_ms=timing_ms).model_dump(
+    return STTAudioOut(
+        ok=True,
+        text=text,
+        error=None,
+        vlm_summary=vlm_summary or None,
+        timing_ms=timing_ms,
+        debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "device": dev},
+    ).model_dump(
         mode="json"
     )
 
 
 @app.post("/stt/warmup")
-def stt_warmup() -> Dict[str, Any]:
-    """Warm up STT provider.
-
-    - google: instantiate Speech client (credential check)
-    - local/whisper: preload faster-whisper model
-    """
+def stt_warmup(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Warm up local STT (fixed to faster-whisper large-v3-turbo)."""
     import os
 
     settings = load_settings()
-    provider = (os.getenv("AITUBER_STT_PROVIDER") or settings.stt_provider or "local").strip().lower()
-    if provider == "google":
-        try:
-            from google.cloud import speech
+    requested = str((payload or {}).get("whisper_device") or "").strip().lower()
+    # Allow env override for users running server-only.
+    device_choice = (requested or os.getenv("AITUBER_WHISPER_DEVICE") or settings.whisper_device or "cpu").strip().lower()
+    dev = "cuda" if device_choice in ("gpu", "cuda") else "cpu"
+    compute_type = "float16" if dev == "cuda" else "int8"
 
-            _ = speech.SpeechClient()
-            return {"ok": True, "provider": "google"}
-        except Exception as e:
-            return {"ok": False, "provider": "google", "error": f"{type(e).__name__}: {e}"[:200]}
-    if provider == "openai":
-        return {"ok": False, "provider": "openai", "error": "unsupported"}
-
-    if provider not in ("local", "whisper", "faster-whisper"):
-        return {"ok": False, "provider": provider, "error": "unknown_provider"}
-
-    model_name = _normalize_whisper_model_name(
-        os.getenv("AITUBER_WHISPER_MODEL") or settings.whisper_model
-    )
-    compute_type = (os.getenv("AITUBER_WHISPER_COMPUTE_TYPE") or settings.whisper_compute_type or "int8").strip() or "int8"
-    device = (os.getenv("AITUBER_WHISPER_DEVICE") or settings.whisper_device or "cpu").strip() or "cpu"
-    cfg = WhisperConfig(model=model_name, device=device, compute_type=compute_type, language="ja")
+    cfg = WhisperConfig(model="large-v3-turbo", device=dev, compute_type=compute_type, language="ja")
     try:
         get_model(cfg)
-        return {"ok": True, "model": model_name, "compute_type": compute_type}
+        return {"ok": True, "provider": "whisper", "model": cfg.model, "device": dev, "compute_type": compute_type}
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:200], "model": model_name}
+        return {
+            "ok": False,
+            "provider": "whisper",
+            "model": cfg.model,
+            "device": dev,
+            "compute_type": compute_type,
+            "error": f"{type(e).__name__}: {e}"[:200],
+        }
 
 
 @app.get("/manager/pending")

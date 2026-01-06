@@ -3,28 +3,62 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
-from google.protobuf.json_format import MessageToDict
-
 from env_loader import load_env_files
+from prompt_loader import read_labeler_prompt
+
+
+_whisper_lock = threading.Lock()
+_whisper_model = None
+_whisper_cfg: tuple[str, str, str] | None = None
+
+
+def _get_whisper_model(*, model: str, device: str, compute_type: str):
+    global _whisper_model, _whisper_cfg
+    key = (model, device, compute_type)
+    with _whisper_lock:
+        if _whisper_model is None or _whisper_cfg != key:
+            from faster_whisper import WhisperModel
+
+            _whisper_model = WhisperModel(model, device=device, compute_type=compute_type)
+            _whisper_cfg = key
+        return _whisper_model
+
+
+def _normalize_language_code(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return "ja"
+    # Accept ja-JP / en-US / etc.
+    return s.split("-")[0].lower() or "ja"
+
+
+def _resample_float32_mono(audio_f32, sample_rate: int, target_sr: int = 16000):
+    import numpy as np
+
+    if audio_f32 is None or getattr(audio_f32, "size", 0) == 0:
+        return audio_f32, sample_rate
+    if sample_rate == target_sr:
+        return audio_f32, sample_rate
+
+    duration = float(audio_f32.size) / float(sample_rate)
+    target_len = int(round(duration * float(target_sr)))
+    if target_len <= 0:
+        return audio_f32, sample_rate
+
+    x_old = np.linspace(0.0, duration, num=audio_f32.size, endpoint=False)
+    x_new = np.linspace(0.0, duration, num=target_len, endpoint=False)
+    out = np.interp(x_new, x_old, audio_f32).astype(np.float32)
+    return out, target_sr
 
 
 def transcribe_wav(wav_path: Path) -> tuple[str, dict[str, Any]]:
     load_env_files(Path(__file__).resolve().parent)
 
-    creds = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip().strip('"')
-    if not creds:
-        raise RuntimeError(
-            "GOOGLE_APPLICATION_CREDENTIALS is not set. Put the service-account JSON path into .env/.env.labeler_loop"
-        )
-    if not Path(creds).exists():
-        raise RuntimeError(f"GOOGLE_APPLICATION_CREDENTIALS points to missing file: {creds}")
-
-    from google.cloud import speech  # imported lazily
-
-    # Parse WAV and send raw LINEAR16 PCM bytes (do NOT send WAV container bytes).
+    # Parse WAV into float32 mono.
     try:
         import io
         import wave
@@ -44,82 +78,73 @@ def transcribe_wav(wav_path: Path) -> tuple[str, dict[str, Any]]:
         audio_i16 = np.frombuffer(frames, dtype=np.int16)
         if channels > 1:
             audio_i16 = audio_i16.reshape(-1, channels).mean(axis=1).astype(np.int16)
-        pcm_bytes = audio_i16.tobytes()
+        audio_f32 = (audio_i16.astype(np.float32) / 32768.0).clip(-1.0, 1.0)
     except Exception as e:
         raise RuntimeError(f"invalid_wav:{type(e).__name__}") from e
 
-    language_code = os.getenv("STT_LANGUAGE_CODE", "ja-JP")
+    language = _normalize_language_code(os.getenv("STT_LANGUAGE_CODE", "ja-JP"))
 
-    client = speech.SpeechClient()
-    audio = speech.RecognitionAudio(content=pcm_bytes)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=sample_rate,
-        language_code=language_code,
-        enable_automatic_punctuation=True,
+    device_choice = (os.getenv("AITUBER_WHISPER_DEVICE") or os.getenv("WHISPER_DEVICE") or "cpu").strip().lower()
+    device = "cuda" if device_choice in ("gpu", "cuda") else "cpu"
+    compute_type = "float16" if device == "cuda" else "int8"
+    model_name = "large-v3-turbo"
+
+    # Resample to 16kHz for Whisper.
+    audio_16k, sr = _resample_float32_mono(audio_f32, sample_rate, 16000)
+
+    model = _get_whisper_model(model=model_name, device=device, compute_type=compute_type)
+    segments, info = model.transcribe(
+        audio_16k,
+        language=language or None,
+        vad_filter=True,
     )
+    text = "".join((s.text or "") for s in segments).strip()
 
-    resp = client.recognize(config=config, audio=audio)
-
-    text_parts: list[str] = []
-    for result in resp.results:
-        if result.alternatives:
-            text_parts.append(result.alternatives[0].transcript)
-    text = "".join(text_parts).strip()
-
-    raw = MessageToDict(resp._pb)  # type: ignore[attr-defined]
-    return text, raw
+    meta: dict[str, Any] = {
+        "provider": "whisper",
+        "model": model_name,
+        "device": device,
+        "compute_type": compute_type,
+        "language": language,
+        "sample_rate": int(sr),
+    }
+    try:
+        meta["duration"] = float(getattr(info, "duration", 0.0) or 0.0)
+        meta["language_probability"] = float(getattr(info, "language_probability", 0.0) or 0.0)
+    except Exception:
+        pass
+    return text, meta
 
 
 def _build_prompt(input_text: str, fewshot_used: list[dict[str, Any]]) -> str:
     lines: list[str] = []
-    lines.append("あなたは日本語の会話用コメント生成。ユーザー発話に対して、返答候補を5つ作る。")
-    lines.append("重要: 出力はJSONのみ。説明文やコードフェンスは禁止。")
-    lines.append("重要: 候補は『言い換え5種』ではなく、目的(mode)が固定の5本。modeの重複は禁止。")
-    lines.append("重要: ユーモアはmodeではなくstyle（味付け）として付与する。")
-    lines.append("重要: 各候補は2〜4文。最後の1文は必ず短い『巻き取り』(次の行動へ促す)で終える。")
-    lines.append("重要: 受付botっぽい定型文は禁止（例: 承知しました/お待ちしております/確認できました/他に何かありますか？など）")
-    lines.append("重要: 正論・丁寧すぎる共感で締めるのは禁止（面白さが死ぬため）")
-    lines.append("重要: 個人攻撃/差別/露骨な性的含みは禁止")
-    lines.append("重要: 同一入力でも必ず多様になるよう、modeごとに出力の役割を分担せよ。")
+    cfg = read_labeler_prompt(section="candidate_generation")
+    for s in (cfg.get("preamble_lines") if isinstance(cfg.get("preamble_lines"), list) else []):
+        if isinstance(s, str) and s:
+            lines.append(s)
 
     # Fixed modes (MUST output exactly once each, in this order)
-    modes = [
-        (
-            "NETWORK",
-            "仲間/連帯の支援。『一緒感』『内輪感』『ツッコミ待ち』を作る。styleでcomedic_tease等を載せやすい。",
-            "comedic_tease",
-        ),
-        (
-            "EMOTIONAL",
-            "共感/寄り添い/安心/励まし。感情を受け止める（ただし丁寧すぎる締めは避け、最後は短く巻き取る）。",
-            "warm",
-        ),
-        (
-            "ESTEEM",
-            "承認/褒め/肯定/鼓舞。自己効力感を上げる（いじり褒め等はstyleで表現）。",
-            "hype",
-        ),
-        (
-            "INFORMATIONAL",
-            "情報/助言/手順。次の一手を具体化する（説教ではなく相棒感）。",
-            "practical",
-        ),
-        (
-            "TANGIBLE",
-            "具体的/実務的支援。『今これやろ』『こう手配しよう』など、行動・手伝い・リソース提案。",
-            "actionable",
-        ),
-    ]
-    lines.append("\nmode定義（必ずこの5本、順番も固定。mode重複禁止）:")
-    for m, d, example_style in modes:
-        lines.append(f"- {m}: {d} (style例: {example_style})")
+    lines.append(str(cfg.get("modes_header") or "").rstrip())
+    modes = cfg.get("modes") if isinstance(cfg.get("modes"), list) else []
+    for item in modes:
+        if not isinstance(item, dict):
+            continue
+        m = str(item.get("mode") or "").strip()
+        d = str(item.get("desc") or "").strip()
+        ex = str(item.get("style_example") or "").strip()
+        if m and d and ex:
+            lines.append(f"- {m}: {d} (style例: {ex})")
 
-    lines.append("\nstyle定義（modeとは独立した味付け。各候補に付けること。例: comedic_tease / warm / hype / practical / actionable）")
-    lines.append("重要: 同じ比喩/同じオチ/同じ締めの巻き取りを5候補で共有しない。似たら作り直す。")
+    style_line = str(cfg.get("style_line") or "").rstrip()
+    if style_line:
+        lines.append(style_line)
+    diversity_line = str(cfg.get("diversity_line") or "").rstrip()
+    if diversity_line:
+        lines.append(diversity_line)
 
     if fewshot_used:
-        lines.append("\n参考例（真似しすぎ禁止、構造だけ参考）:")
+        fewshot_header = str(cfg.get("fewshot_header") or "").rstrip() or "\n"
+        lines.append(fewshot_header)
         for ex in fewshot_used:
             ex_in = str(ex.get("input") or "")
             ex_win = str(ex.get("winner") or "")
@@ -140,9 +165,11 @@ def _build_prompt(input_text: str, fewshot_used: list[dict[str, Any]]) -> str:
         ]
     }
 
-    lines.append("\nユーザー発話:")
+    user_header = str(cfg.get("user_header") or "").rstrip() or "\n"
+    lines.append(user_header)
     lines.append(input_text.strip())
-    lines.append("\n必ず次のJSONスキーマに一致するJSONだけを返せ:")
+    schema_header = str(cfg.get("schema_header") or "").rstrip() or "\n"
+    lines.append(schema_header)
     lines.append(json.dumps(schema, ensure_ascii=False))
 
     return "\n".join(lines)
@@ -322,14 +349,14 @@ def regenerate_candidates_json(
     """
 
     lines: list[str] = []
-    lines.append("あなたは日本語の会話用コメント生成。")
-    lines.append("重要: 出力はJSONのみ。説明文やコードフェンスは禁止。")
-    lines.append("重要: これは部分再生成。指定されたmodeだけを再生成し、被りを強く避ける。")
-    lines.append("重要: 各候補は2〜4文。最後の1文は必ず短い『巻き取り』で終える。")
-    lines.append("重要: 受付botっぽい定型文は禁止。個人攻撃/差別/露骨な性的含みは禁止。")
+    cfg = read_labeler_prompt(section="regen_generation")
+    for s in (cfg.get("preamble_lines") if isinstance(cfg.get("preamble_lines"), list) else []):
+        if isinstance(s, str) and s:
+            lines.append(s)
 
     # Provide existing candidates to forbid overlaps.
-    lines.append("\nすでに出た候補（この文面/言い回し/オチ/比喩/罰ゲーム/締めの巻き取りまで含め、被り禁止）:")
+    existing_header = str(cfg.get("existing_header") or "").rstrip() or "\n"
+    lines.append(existing_header)
     for c in existing_candidates:
         m = str(c.get("mode") or "")
         t = str(c.get("text") or "")
@@ -337,17 +364,20 @@ def regenerate_candidates_json(
             continue
         lines.append(f"- {m}: {t}")
 
-    lines.append("\nユーザー発話:")
+    user_header = str(cfg.get("user_header") or "").rstrip() or "\n"
+    lines.append(user_header)
     lines.append(input_text.strip())
 
-    lines.append("\n再生成するmode（このmodeだけ返せ。他のmodeは禁止）:")
+    regen_modes_header = str(cfg.get("regen_modes_header") or "").rstrip() or "\n"
+    lines.append(regen_modes_header)
     for m in regen_modes:
         lines.append(f"- {m}")
 
     schema = {
         "candidates": [{"mode": "<one_of_requested_modes>", "text": "..."}],
     }
-    lines.append("\n必ず次のJSONスキーマに一致するJSONだけを返せ:")
+    schema_header = str(cfg.get("schema_header") or "").rstrip() or "\n"
+    lines.append(schema_header)
     lines.append(json.dumps(schema, ensure_ascii=False))
 
     prompt = "\n".join(lines)

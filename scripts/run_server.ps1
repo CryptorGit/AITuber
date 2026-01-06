@@ -1,6 +1,7 @@
 param(
   [string]$HostAddr = $env:AITUBER_SERVER_HOST,
-  [int]$Port = [int]($env:AITUBER_SERVER_PORT)
+  [int]$Port = [int]($env:AITUBER_SERVER_PORT),
+  [switch]$Reload
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,12 +24,33 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 
 Write-Host "[run_server] Starting uvicorn on $HostAddr`:$Port" -ForegroundColor Cyan
 
+# If the server is already running, don't try to bind again.
+$baseUrl = "http://$HostAddr`:$Port"
+try {
+  $h = Invoke-RestMethod ($baseUrl.TrimEnd('/') + '/health') -TimeoutSec 1
+  if ($h -and $h.ok) {
+    Write-Host "[run_server] Server already running: $baseUrl" -ForegroundColor Green
+    Write-Host "Console: $baseUrl/console" -ForegroundColor Green
+    Write-Host "Stage:   $baseUrl/stage" -ForegroundColor Green
+    return
+  }
+} catch {
+  # ignore
+}
+
 # Uvicorn access logs can be extremely noisy due to polling endpoints (e.g. /overlay_text).
 # Default: suppress access log. Set AITUBER_UVICORN_ACCESS_LOG=1 to re-enable.
 $accessLog = (($env:AITUBER_UVICORN_ACCESS_LOG + '').Trim().ToLower())
-$args = @('uvicorn','apps.main.server.main:app','--host',$HostAddr,'--port',[string]$Port,'--reload')
-if ($accessLog -notin @('1','true','yes','on')) {
-  $args += '--no-access-log'
+
+$args = @('scripts/run_uvicorn.py','--host',$HostAddr,'--port',[string]$Port)
+if ($accessLog -in @('1','true','yes','on')) {
+  $args += '--access-log'
 }
 
-& .\.venv\Scripts\python.exe -m @args
+# Note: --reload intentionally spawns a second "reloader" process.
+# Default is single-process (no reload). Use -Reload to enable hot reload.
+if ($Reload) {
+  $args += '--reload'
+}
+
+& .\.venv\Scripts\python.exe @args

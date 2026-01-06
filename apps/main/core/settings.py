@@ -86,17 +86,12 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="gemini")
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-2.0-flash-lite")
-    openai_api_key: str = Field(default="")
-    openai_model: str = Field(default="gpt-4o-mini")
 
-    # STT
-    stt_provider: str = Field(default="google")
+    # STT (hard-locked to local faster-whisper large-v3-turbo)
     stt_enabled: bool = Field(default=True)
-    whisper_model: str = Field(default="large-v3-turbo")
-    whisper_compute_type: str = Field(default="int8")
     whisper_device: str = Field(default="cpu")
-    stt_chunk_seconds: float = Field(default=0.8)
-    openai_whisper_model: str = Field(default="whisper-1")
+    # Browser sends periodic chunks; too-small chunks noticeably hurt accuracy.
+    stt_chunk_seconds: float = Field(default=2.0)
 
     # TTS
     tts_provider: str = Field(default="google")
@@ -160,7 +155,6 @@ def load_settings(*, env_file: Optional[Path] = None) -> Settings:
     # Hard-lock providers regardless of env/console settings.
     os.environ["AITUBER_LLM_PROVIDER"] = "gemini"
     os.environ["AITUBER_TTS_PROVIDER"] = "google"
-    os.environ["AITUBER_STT_PROVIDER"] = "google"
 
     # Resolve GOOGLE_APPLICATION_CREDENTIALS from .env/ folder if not set.
     try:
@@ -189,20 +183,6 @@ def load_settings(*, env_file: Optional[Path] = None) -> Settings:
             v = os.getenv(k)
             if v and v.strip():
                 os.environ["AITUBER_GEMINI_MODEL"] = v
-                break
-
-    if not (os.getenv("AITUBER_OPENAI_API_KEY") or "").strip():
-        for k in ("OPENAI_API_KEY", "OPENAI_KEY"):
-            v = os.getenv(k)
-            if v and v.strip():
-                os.environ["AITUBER_OPENAI_API_KEY"] = v
-                break
-
-    if not (os.getenv("AITUBER_OPENAI_MODEL") or "").strip():
-        for k in ("OPENAI_MODEL",):
-            v = os.getenv(k)
-            if v and v.strip():
-                os.environ["AITUBER_OPENAI_MODEL"] = v
                 break
 
     settings = Settings()
@@ -275,9 +255,7 @@ def _apply_console_settings(settings: Settings) -> None:
 
         providers = raw.get("providers")
         if isinstance(providers, dict):
-            stt = str(providers.get("stt") or "").strip().lower()
-            if stt:
-                settings.stt_provider = stt
+            # STT is hard-locked; ignore stt provider changes.
             llm = str(providers.get("llm") or "").strip().lower()
             if llm:
                 settings.llm_provider = llm

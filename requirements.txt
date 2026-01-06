@@ -21,13 +21,10 @@ Pillow>=10.0
 # Optional providers (graceful fallback if not configured)
 google-genai>=0.6
 google-cloud-texttospeech>=2.16
-google-cloud-speech>=2.26
-openai>=1.12
 
 # STT (local)
 faster-whisper>=1.1
 numpy>=1.26
-webrtcvad>=2.0.10
 
 # Optional: title wordcloud generation
 janome>=0.5

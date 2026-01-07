@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>AITuber Settings</title>
     <style>
       body {
@@ -132,7 +135,7 @@
           <option value="gpu">gpu</option>
         </select>
 
-        <label>Live2D モデル選択（/web/models 配下）</label>
+        <label>Live2D モデル選択（/models 配下）</label>
         <div style="display:flex; gap:8px; align-items:center; margin-top:6px">
           <button id="browseModelFolder" type="button">フォルダ参照…</button>
           <input
@@ -209,6 +212,123 @@
           <div id="outSpeech" style="white-space:pre-wrap"></div>
         </div>
         <div class="muted" style="margin-top:10px" id="outMeta"></div>
+      </div>
+
+      <div class="card">
+        <h2>STT / VAD</h2>
+        <label>STT model</label>
+        <select id="sttModel"></select>
+        <div style="display:flex; gap:8px; margin-top:6px">
+          <input id="sttModelAdd" placeholder="Add STT model" />
+          <button id="sttModelAddBtn" type="button" class="btn-inline">Add</button>
+          <button id="sttModelRemoveBtn" type="button" class="btn-inline">Delete</button>
+        </div>
+
+        <label>STT language (BCP-47, e.g. ja-JP)</label>
+        <input id="sttLanguage" placeholder="ja-JP" />
+
+        <h3>VAD (server)</h3>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:140px; flex:1">
+            <label>threshold</label>
+            <input id="vadThreshold" type="number" step="0.01" min="0" max="1" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>silence_threshold</label>
+            <input id="vadSilenceThreshold" type="number" step="0.01" min="0" max="1" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>min_speech_ms</label>
+            <input id="vadMinSpeechMs" type="number" step="10" min="0" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:160px; flex:1">
+            <label>min_silence_ms</label>
+            <input id="vadMinSilenceMs" type="number" step="10" min="0" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>speech_pad_ms</label>
+            <input id="vadSpeechPadMs" type="number" step="10" min="0" />
+          </div>
+          <div style="min-width:140px; flex:1">
+            <label>frame_ms</label>
+            <input id="vadFrameMs" type="number" step="1" min="1" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:160px; flex:1">
+            <label>vad_sample_rate</label>
+            <input id="vadSampleRate" type="number" step="1000" min="8000" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>max_buffer_ms</label>
+            <input id="vadMaxBufferMs" type="number" step="1000" min="1000" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>vad_device</label>
+            <select id="vadDevice">
+              <option value="">auto</option>
+              <option value="cpu">cpu</option>
+              <option value="cuda">cuda</option>
+            </select>
+          </div>
+        </div>
+        <label>vad_model_path (optional)</label>
+        <input id="vadModelPath" placeholder="C:\\models\\silero_vad.jit" />
+
+        <h3>Fallback gating (server)</h3>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:160px; flex:1">
+            <label>fallback_min_amp</label>
+            <input id="vadFallbackMinAmp" type="number" step="0.0001" min="0" max="1" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>fallback_min_rms</label>
+            <input id="vadFallbackMinRms" type="number" step="0.0001" min="0" max="1" />
+          </div>
+        </div>
+
+        <h3>Client segmentation (browser)</h3>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:160px; flex:1">
+            <label>voice_rms_threshold</label>
+            <input id="sttVoiceRmsThreshold" type="number" step="0.0001" min="0" max="1" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>silence_ms</label>
+            <input id="sttSilenceMs" type="number" step="10" min="0" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>min_utterance_ms</label>
+            <input id="sttMinUtteranceMs" type="number" step="10" min="0" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:160px; flex:1">
+            <label>max_utterance_ms</label>
+            <input id="sttMaxUtteranceMs" type="number" step="100" min="0" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>pre_roll_ms</label>
+            <input id="sttPreRollMs" type="number" step="10" min="0" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>tick_ms</label>
+            <input id="sttTickMs" type="number" step="10" min="50" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:160px; flex:1">
+            <label>buffer_size</label>
+            <input id="sttBufferSize" type="number" step="256" min="256" />
+          </div>
+          <div style="min-width:180px; flex:1">
+            <label>submit_timeout_ms</label>
+            <input id="sttSubmitTimeoutMs" type="number" step="1000" min="1000" />
+          </div>
+        </div>
+        <div class="muted" style="margin-top:6px">Save via "Save all settings"</div>
       </div>
 
       <div class="card">
@@ -320,7 +440,12 @@
         <div class="row" style="margin-top:6px">
           <div style="min-width:240px; flex:1">
             <label>LLM model</label>
-            <input id="llmModel" placeholder="gemini-2.0-flash-lite" />
+            <select id="llmModel"></select>
+            <div style="display:flex; gap:8px; margin-top:6px">
+              <input id="llmModelAdd" placeholder="Add LLM model" />
+              <button id="llmModelAddBtn" type="button" class="btn-inline">Add</button>
+              <button id="llmModelRemoveBtn" type="button" class="btn-inline">Delete</button>
+            </div>
           </div>
           <div style="min-width:160px; flex:1">
             <label>LLM temperature</label>
@@ -339,7 +464,12 @@
         <div class="row" style="margin-top:6px">
           <div style="min-width:240px; flex:1">
             <label>VLM model</label>
-            <input id="vlmModel" placeholder="gemini-2.0-flash-lite" />
+            <select id="vlmModel"></select>
+            <div style="display:flex; gap:8px; margin-top:6px">
+              <input id="vlmModelAdd" placeholder="Add VLM model" />
+              <button id="vlmModelAddBtn" type="button" class="btn-inline">Add</button>
+              <button id="vlmModelRemoveBtn" type="button" class="btn-inline">Delete</button>
+            </div>
           </div>
           <div style="min-width:160px; flex:1">
             <label>VLM temperature</label>
@@ -352,9 +482,23 @@
         </div>
         <button id="vlmSave">VLM 設定を保存</button>
         <div class="muted" id="vlmPromptStatus" style="margin-top:8px"></div>
+
+        <h3 style="margin-top:12px">TTS</h3>
+        <label>TTS provider</label>
+        <select id="ttsProvider">
+          <option value="google">google</option>
+          <option value="stub">stub</option>
+        </select>
+        <label>TTS voice</label>
+        <select id="ttsVoice"></select>
+        <div style="display:flex; gap:8px; margin-top:6px">
+          <input id="ttsVoiceAdd" placeholder="Add TTS voice" />
+          <button id="ttsVoiceAddBtn" type="button" class="btn-inline">Add</button>
+          <button id="ttsVoiceRemoveBtn" type="button" class="btn-inline">Delete</button>
+        </div>
       </div>
     </div>
 
-    <script src="console.js"></script>
+    <script src="console.js?v=20260107"></script>
   </body>
 </html>

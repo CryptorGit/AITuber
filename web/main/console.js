@@ -57,10 +57,51 @@
 
     vlmSystemPrompt: document.getElementById('vlmSystemPrompt'),
     vlmModel: document.getElementById('vlmModel'),
+    vlmModelAdd: document.getElementById('vlmModelAdd'),
+    vlmModelAddBtn: document.getElementById('vlmModelAddBtn'),
+    vlmModelRemoveBtn: document.getElementById('vlmModelRemoveBtn'),
     vlmTemp: document.getElementById('vlmTemp'),
     vlmMaxTokens: document.getElementById('vlmMaxTokens'),
     vlmSave: document.getElementById('vlmSave'),
     vlmPromptStatus: document.getElementById('vlmPromptStatus'),
+
+    llmModelAdd: document.getElementById('llmModelAdd'),
+    llmModelAddBtn: document.getElementById('llmModelAddBtn'),
+    llmModelRemoveBtn: document.getElementById('llmModelRemoveBtn'),
+
+    sttModel: document.getElementById('sttModel'),
+    sttModelAdd: document.getElementById('sttModelAdd'),
+    sttModelAddBtn: document.getElementById('sttModelAddBtn'),
+    sttModelRemoveBtn: document.getElementById('sttModelRemoveBtn'),
+    sttLanguage: document.getElementById('sttLanguage'),
+
+    vadThreshold: document.getElementById('vadThreshold'),
+    vadSilenceThreshold: document.getElementById('vadSilenceThreshold'),
+    vadMinSpeechMs: document.getElementById('vadMinSpeechMs'),
+    vadMinSilenceMs: document.getElementById('vadMinSilenceMs'),
+    vadSpeechPadMs: document.getElementById('vadSpeechPadMs'),
+    vadFrameMs: document.getElementById('vadFrameMs'),
+    vadSampleRate: document.getElementById('vadSampleRate'),
+    vadMaxBufferMs: document.getElementById('vadMaxBufferMs'),
+    vadModelPath: document.getElementById('vadModelPath'),
+    vadDevice: document.getElementById('vadDevice'),
+    vadFallbackMinAmp: document.getElementById('vadFallbackMinAmp'),
+    vadFallbackMinRms: document.getElementById('vadFallbackMinRms'),
+
+    sttVoiceRmsThreshold: document.getElementById('sttVoiceRmsThreshold'),
+    sttSilenceMs: document.getElementById('sttSilenceMs'),
+    sttMinUtteranceMs: document.getElementById('sttMinUtteranceMs'),
+    sttMaxUtteranceMs: document.getElementById('sttMaxUtteranceMs'),
+    sttPreRollMs: document.getElementById('sttPreRollMs'),
+    sttTickMs: document.getElementById('sttTickMs'),
+    sttBufferSize: document.getElementById('sttBufferSize'),
+    sttSubmitTimeoutMs: document.getElementById('sttSubmitTimeoutMs'),
+
+    ttsProvider: document.getElementById('ttsProvider'),
+    ttsVoice: document.getElementById('ttsVoice'),
+    ttsVoiceAdd: document.getElementById('ttsVoiceAdd'),
+    ttsVoiceAddBtn: document.getElementById('ttsVoiceAddBtn'),
+    ttsVoiceRemoveBtn: document.getElementById('ttsVoiceRemoveBtn'),
   };
 
   let mediaStream = null;
@@ -70,6 +111,7 @@
   let audioProcessor = null;
   let pcmChunks = [];
   let pcmSampleRate = 48000;
+  let sttResumePointerHandler = null;
   let sttTimer = null;
   let sttBusy = false;
   // Client-side utterance buffering (silence-based segmentation)
@@ -90,6 +132,14 @@
   // Client-side timing / last-seen state for polling
   let lastSeenRunId = '';
   let lastSeenTtsVersion = null;
+
+  let currentSettings = {};
+  const modelLists = {
+    stt: [],
+    llm: [],
+    vlm: [],
+    tts: [],
+  };
 
   function setVlmStatus(msg) {
     if (el.vlmStatus) el.vlmStatus.textContent = msg || '';
@@ -159,6 +209,28 @@
     return s === 'gpu' || s === 'cuda' ? 'gpu' : 'cpu';
   }
 
+  function getSttLanguage() {
+    const v = el.sttLanguage ? String(el.sttLanguage.value || '') : '';
+    return v.trim() || 'ja-JP';
+  }
+
+  function getSttClientConfig() {
+    const cfg = {
+      voiceRmsThreshold: clampNumber(toNumber(el.sttVoiceRmsThreshold && el.sttVoiceRmsThreshold.value), 0, 1, 0.006),
+      silenceMs: clampInt(toInt(el.sttSilenceMs && el.sttSilenceMs.value), 0, 60000, 700),
+      minUtteranceMs: clampInt(toInt(el.sttMinUtteranceMs && el.sttMinUtteranceMs.value), 0, 60000, 350),
+      maxUtteranceMs: clampInt(toInt(el.sttMaxUtteranceMs && el.sttMaxUtteranceMs.value), 1000, 600000, 12000),
+      preRollMs: clampInt(toInt(el.sttPreRollMs && el.sttPreRollMs.value), 0, 2000, 350),
+      tickMs: clampInt(toInt(el.sttTickMs && el.sttTickMs.value), 50, 5000, 200),
+      bufferSize: clampInt(toInt(el.sttBufferSize && el.sttBufferSize.value), 256, 16384, 4096),
+      submitTimeoutMs: clampInt(toInt(el.sttSubmitTimeoutMs && el.sttSubmitTimeoutMs.value), 1000, 600000, 15000),
+    };
+    // Ensure ScriptProcessor buffer size is a power of two.
+    const pow2 = 1 << Math.round(Math.log2(cfg.bufferSize));
+    cfg.bufferSize = clampInt(pow2, 256, 16384, 4096);
+    return cfg;
+  }
+
   function encodeWavFloat32Mono(chunks, sampleRate) {
     let length = 0;
     for (const c of chunks) length += c.length;
@@ -213,11 +285,12 @@
     sttBusy = true;
     let timeoutId = null;
     try {
+      const clientCfg = getSttClientConfig();
       // Clear previous text immediately so it never lingers between recognitions.
       resetSttBuffer();
       if (el.speechStatus) el.speechStatus.textContent = 'STT: sending audio...';
       const form = new FormData();
-      form.append('lang', 'ja-JP');
+      form.append('lang', getSttLanguage());
       form.append('file', wav, 'mic.wav');
       form.append('whisper_device', getWhisperDevice());
       form.append('stt_enabled', el.sttEnabled && el.sttEnabled.checked ? '1' : '0');
@@ -225,16 +298,33 @@
       form.append('vlm_force', vlmForce);
 
       sttAbortController = new AbortController();
+
       // If Whisper is still loading/downloading, the request can take a long time.
-      // Ensure the UI never gets stuck in "sending_audio" forever.
-      timeoutId = setTimeout(() => {
-        try {
-          if (sttAbortController) sttAbortController.abort();
-        } catch {
-          // ignore
-        }
-      }, 15000);
-      const j = await formPost('/stt/audio', form, { signal: sttAbortController.signal });
+      // Some browser/network edge-cases can ignore AbortController; race with a timeout
+      // so the UI always recovers.
+      const timeoutMs = clampInt(toInt(clientCfg.submitTimeoutMs), 1000, 600000, 15000);
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          try {
+            if (sttAbortController) sttAbortController.abort();
+          } catch {
+            // ignore
+          }
+          let err = null;
+          try {
+            err = new DOMException('timeout', 'AbortError');
+          } catch {
+            err = new Error('timeout');
+            err.name = 'AbortError';
+          }
+          reject(err);
+        }, timeoutMs);
+      });
+
+      const j = await Promise.race([
+        formPost('/stt/audio', form, { signal: sttAbortController.signal }),
+        timeoutPromise,
+      ]);
       const text = j && j.ok ? String(j.text || '').trim() : '';
       const vlmSummary = j && j.vlm_summary ? String(j.vlm_summary || '').trim() : '';
       if (!text) {
@@ -279,6 +369,48 @@
     } catch {
       // ignore
     }
+  }
+
+  async function ensureAudioContextRunning(ctx) {
+    if (!ctx) return false;
+    if (ctx.state === 'running') return true;
+
+    try {
+      await ctx.resume();
+    } catch {
+      // ignore
+    }
+    if (ctx.state === 'running') return true;
+
+    // If STT auto-starts on page load, many browsers keep AudioContext suspended
+    // until the next user gesture. Set up a one-shot resume handler.
+    if (!sttResumePointerHandler) {
+      sttResumePointerHandler = async () => {
+        if (!audioCtx) return;
+        try {
+          await audioCtx.resume();
+        } catch {
+          // ignore
+        }
+        if (audioCtx && audioCtx.state === 'running') {
+          if (el.speechStatus) el.speechStatus.textContent = 'STT: recording started.';
+          try {
+            document.removeEventListener('pointerdown', sttResumePointerHandler, true);
+          } catch {
+            // ignore
+          }
+          sttResumePointerHandler = null;
+        } else {
+          if (el.speechStatus) el.speechStatus.textContent = 'STT: AudioContext suspended (click to enable audio).';
+        }
+      };
+      try {
+        document.addEventListener('pointerdown', sttResumePointerHandler, true);
+      } catch {
+        // ignore
+      }
+    }
+    return ctx.state === 'running';
   }
 
   async function stopRecorderAndMaybeSendFinal() {
@@ -392,7 +524,18 @@
 
   async function formPost(url, form, opts = {}) {
     const res = await fetch(url, { method: 'POST', body: form, cache: 'no-store', ...opts });
-    return res.json();
+    try {
+      return await res.json();
+    } catch {
+      // Surface non-JSON responses (e.g. proxy errors) instead of hanging UI logic.
+      let bodyText = '';
+      try {
+        bodyText = await res.text();
+      } catch {
+        // ignore
+      }
+      return { ok: false, error: `non_json_response:${res.status}`, debug: { status: res.status, body: bodyText.slice(0, 200) } };
+    }
   }
 
   function persistStagePrefs() {
@@ -496,7 +639,7 @@
       } else if (!items.length) {
         const opt = document.createElement('option');
         opt.value = '';
-        opt.textContent = '(web/models に .model3.json が見つかりません)';
+        opt.textContent = '(/models に .model3.json が見つかりません)';
         el.modelSelect.appendChild(opt);
       }
     } catch (e) {
@@ -588,8 +731,9 @@
     try {
       let vlmSummary = String((opts && opts.vlmSummary) || '').trim();
       const includeVlm = shouldIncludeVlm(t, vlmSummary);
-      const llmProvider = 'gemini';
-      const ttsProvider = 'google';
+      const providers = (currentSettings && currentSettings.providers) || {};
+      const llmProvider = String(providers.llm || 'gemini');
+      const ttsProvider = String((el.ttsProvider && el.ttsProvider.value) || providers.tts || 'google');
 
       if (includeVlm && !vlmSummary) {
         setVlmStatus('VLM: capturing frame...');
@@ -621,8 +765,8 @@
           // We summarize via /vlm/frame; send summary to the server pipeline.
           vlm_image_base64: null,
           vlm_summary: vlmSummary || null,
-          llm_provider: 'gemini',
-          tts_provider: 'google',
+          llm_provider: llmProvider,
+          tts_provider: ttsProvider,
         }),
       });
 
@@ -669,6 +813,15 @@
       // ignore
     }
     sttTimer = null;
+
+    if (sttResumePointerHandler) {
+      try {
+        document.removeEventListener('pointerdown', sttResumePointerHandler, true);
+      } catch {
+        // ignore
+      }
+      sttResumePointerHandler = null;
+    }
     if (sttAbortController) {
       try {
         sttAbortController.abort();
@@ -719,21 +872,24 @@
 
     const AC = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AC();
+    const ok = await ensureAudioContextRunning(audioCtx);
+    if (!ok && el.speechStatus) el.speechStatus.textContent = 'STT: AudioContext suspended (click to enable audio).';
     pcmSampleRate = audioCtx.sampleRate || 48000;
     const audioOnly = new MediaStream([tracks[0]]);
     audioSource = audioCtx.createMediaStreamSource(audioOnly);
 
+    const clientCfg = getSttClientConfig();
     // ScriptProcessor is deprecated but works widely and is enough here.
-    const bufferSize = 4096;
+    const bufferSize = clientCfg.bufferSize;
     audioProcessor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
     pcmChunks = [];
 
     // Segmentation params
-    const VOICE_RMS_THRESHOLD = 0.006;
-    const SILENCE_MS = 700;
-    const MIN_UTTERANCE_MS = 350;
-    const MAX_UTTERANCE_MS = 12000;
-    const PRE_ROLL_MS = 350;
+    const VOICE_RMS_THRESHOLD = clientCfg.voiceRmsThreshold;
+    const SILENCE_MS = clientCfg.silenceMs;
+    const MIN_UTTERANCE_MS = clientCfg.minUtteranceMs;
+    const MAX_UTTERANCE_MS = clientCfg.maxUtteranceMs;
+    const PRE_ROLL_MS = clientCfg.preRollMs;
     const preRollMaxSamples = Math.max(0, Math.floor(pcmSampleRate * (PRE_ROLL_MS / 1000)));
 
     function pushPreRoll(chunk) {
@@ -818,8 +974,8 @@
     // Check frequently; actual POST is gated by sttBusy.
     sttTimer = setInterval(() => {
       void tickSegmentation();
-    }, 200);
-    el.speechStatus.textContent = 'STT: recording started.';
+    }, clientCfg.tickMs);
+    if (el.speechStatus && (!audioCtx || audioCtx.state === 'running')) el.speechStatus.textContent = 'STT: recording started.';
 
     // Warm up the Whisper model in the background (prevents first request from feeling stuck).
     warmupStt();
@@ -856,6 +1012,16 @@
     if (statusEl) statusEl.textContent = msg || '';
   }
 
+  function clampNumber(val, min, max, fallback) {
+    if (!Number.isFinite(val)) return fallback;
+    return Math.max(min, Math.min(max, val));
+  }
+
+  function clampInt(val, min, max, fallback) {
+    if (!Number.isFinite(val)) return fallback;
+    return Math.max(min, Math.min(max, Math.trunc(val)));
+  }
+
   function toNumber(val) {
     const n = Number(val);
     return Number.isFinite(n) ? n : null;
@@ -866,6 +1032,86 @@
     return Number.isFinite(n) ? n : null;
   }
 
+  function normalizeList(val) {
+    if (!Array.isArray(val)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const item of val) {
+      const s = String(item || '').trim();
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+    }
+    return out;
+  }
+
+  function renderSelectOptions(selectEl, items, selected, emptyLabel) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    const displayItems = items.slice();
+    if (selected && !displayItems.includes(selected)) {
+      displayItems.unshift(selected);
+    }
+    if (!displayItems.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = emptyLabel || '(empty)';
+      selectEl.appendChild(opt);
+      return;
+    }
+    for (const item of displayItems) {
+      const opt = document.createElement('option');
+      opt.value = item;
+      opt.textContent = item;
+      selectEl.appendChild(opt);
+    }
+    if (selected && displayItems.includes(selected)) {
+      selectEl.value = selected;
+    } else {
+      selectEl.value = displayItems[0];
+    }
+  }
+
+  function modelSelectForKind(kind) {
+    if (kind === 'stt') return el.sttModel;
+    if (kind === 'llm') return el.llmModel;
+    if (kind === 'vlm') return el.vlmModel;
+    if (kind === 'tts') return el.ttsVoice;
+    return null;
+  }
+
+  function emptyLabelForKind(kind) {
+    if (kind === 'tts') return '(no voices)';
+    return '(no models)';
+  }
+
+  function setModelList(kind, list, selected) {
+    const cleaned = normalizeList(list);
+    modelLists[kind] = cleaned;
+    renderSelectOptions(modelSelectForKind(kind), cleaned, selected, emptyLabelForKind(kind));
+  }
+
+  function addModelToList(kind, value) {
+    const v = String(value || '').trim();
+    if (!v) return;
+    const list = modelLists[kind] || [];
+    if (!list.includes(v)) list.push(v);
+    modelLists[kind] = list;
+    renderSelectOptions(modelSelectForKind(kind), list, v, emptyLabelForKind(kind));
+  }
+
+  function removeModelFromList(kind, value) {
+    const v = String(value || '').trim();
+    const list = modelLists[kind] || [];
+    if (!list.includes(v)) {
+      renderSelectOptions(modelSelectForKind(kind), list, '', emptyLabelForKind(kind));
+      return;
+    }
+    const next = list.filter((item) => item !== v);
+    modelLists[kind] = next;
+    renderSelectOptions(modelSelectForKind(kind), next, '', emptyLabelForKind(kind));
+  }
+
   function buildSettingsPayload() {
     const llmTemp = toNumber(el.llmTemp && el.llmTemp.value);
     const llmMax = toInt(el.llmMaxTokens && el.llmMaxTokens.value);
@@ -873,25 +1119,79 @@
     const vlmMax = toInt(el.vlmMaxTokens && el.vlmMaxTokens.value);
     const shortMax = toInt(el.shortTermMaxEvents && el.shortTermMaxEvents.value);
     const turnsToPrompt = toInt(el.shortTermTurnsToPrompt && el.shortTermTurnsToPrompt.value);
+    const vadThreshold = toNumber(el.vadThreshold && el.vadThreshold.value);
+    const vadSilenceThreshold = toNumber(el.vadSilenceThreshold && el.vadSilenceThreshold.value);
+    const vadMinSpeechMs = toInt(el.vadMinSpeechMs && el.vadMinSpeechMs.value);
+    const vadMinSilenceMs = toInt(el.vadMinSilenceMs && el.vadMinSilenceMs.value);
+    const vadSpeechPadMs = toInt(el.vadSpeechPadMs && el.vadSpeechPadMs.value);
+    const vadFrameMs = toInt(el.vadFrameMs && el.vadFrameMs.value);
+    const vadSampleRate = toInt(el.vadSampleRate && el.vadSampleRate.value);
+    const vadMaxBufferMs = toInt(el.vadMaxBufferMs && el.vadMaxBufferMs.value);
+    const vadFallbackMinAmp = toNumber(el.vadFallbackMinAmp && el.vadFallbackMinAmp.value);
+    const vadFallbackMinRms = toNumber(el.vadFallbackMinRms && el.vadFallbackMinRms.value);
+
+    const clientCfg = getSttClientConfig();
+    const sttLang = getSttLanguage();
+    const sttModel = String((el.sttModel && el.sttModel.value) || '').trim();
+    const ttsProvider = el.ttsProvider ? String(el.ttsProvider.value || '').trim().toLowerCase() : '';
+    const ttsVoice = String((el.ttsVoice && el.ttsVoice.value) || '').trim();
+    const providers = (currentSettings && currentSettings.providers) || {};
 
     return {
-      // Providers are intentionally locked for this workflow.
       providers: {
-        stt: 'local',
-        llm: 'gemini',
-        tts: 'google',
+        stt: String(providers.stt || 'local').trim().toLowerCase() || 'local',
+        llm: String(providers.llm || 'gemini').trim().toLowerCase() || 'gemini',
+        tts: ttsProvider || String(providers.tts || 'google').trim().toLowerCase() || 'google',
       },
       llm: {
         system_prompt: String((el.llmSystemPrompt && el.llmSystemPrompt.value) || ''),
         model: String((el.llmModel && el.llmModel.value) || ''),
+        model_list: modelLists.llm || [],
         temperature: llmTemp ?? 0.7,
         max_output_tokens: llmMax ?? 1024,
       },
       vlm: {
         system_prompt: String((el.vlmSystemPrompt && el.vlmSystemPrompt.value) || ''),
         model: String((el.vlmModel && el.vlmModel.value) || ''),
+        model_list: modelLists.vlm || [],
         temperature: vlmTemp ?? 0.2,
         max_output_tokens: vlmMax ?? 256,
+      },
+      stt: {
+        model: sttModel,
+        model_list: modelLists.stt || [],
+        language: sttLang,
+        vad: {
+          threshold: vadThreshold ?? 0.5,
+          silence_threshold: vadSilenceThreshold ?? null,
+          min_speech_ms: vadMinSpeechMs ?? 200,
+          min_silence_ms: vadMinSilenceMs ?? 350,
+          speech_pad_ms: vadSpeechPadMs ?? 120,
+          frame_ms: vadFrameMs ?? 32,
+          vad_sample_rate: vadSampleRate ?? 16000,
+          max_buffer_ms: vadMaxBufferMs ?? 30000,
+          model_path: String((el.vadModelPath && el.vadModelPath.value) || ''),
+          device: String((el.vadDevice && el.vadDevice.value) || ''),
+        },
+        client: {
+          voice_rms_threshold: clientCfg.voiceRmsThreshold,
+          silence_ms: clientCfg.silenceMs,
+          min_utterance_ms: clientCfg.minUtteranceMs,
+          max_utterance_ms: clientCfg.maxUtteranceMs,
+          pre_roll_ms: clientCfg.preRollMs,
+          tick_ms: clientCfg.tickMs,
+          buffer_size: clientCfg.bufferSize,
+          submit_timeout_ms: clientCfg.submitTimeoutMs,
+        },
+        fallback: {
+          min_amp: vadFallbackMinAmp ?? 0.008,
+          min_rms: vadFallbackMinRms ?? 0.0015,
+        },
+      },
+      tts: {
+        provider: ttsProvider || 'google',
+        voice: ttsVoice,
+        voice_list: modelLists.tts || [],
       },
       toggles: {
         stt: Boolean(el.sttEnabled && el.sttEnabled.checked),
@@ -916,6 +1216,7 @@
         body: JSON.stringify(payload),
       });
       if (j && j.ok) {
+        currentSettings = payload;
         setStatusEl(el.saveAllStatus, 'saved');
       } else {
         setStatusEl(el.saveAllStatus, `save failed: ${(j && j.error) || 'unknown'}`);
@@ -927,18 +1228,64 @@
 
   function applySettings(settings) {
     const s = settings || {};
+    currentSettings = s;
 
     const llm = s.llm || {};
     if (el.llmSystemPrompt) el.llmSystemPrompt.value = String(llm.system_prompt || '');
-    if (el.llmModel) el.llmModel.value = String(llm.model || '');
+    setModelList('llm', llm.model_list || [], String(llm.model || ''));
     if (el.llmTemp && llm.temperature != null) el.llmTemp.value = String(llm.temperature);
     if (el.llmMaxTokens && llm.max_output_tokens != null) el.llmMaxTokens.value = String(llm.max_output_tokens);
 
     const vlm = s.vlm || {};
     if (el.vlmSystemPrompt) el.vlmSystemPrompt.value = String(vlm.system_prompt || '');
-    if (el.vlmModel) el.vlmModel.value = String(vlm.model || '');
+    setModelList('vlm', vlm.model_list || [], String(vlm.model || ''));
     if (el.vlmTemp && vlm.temperature != null) el.vlmTemp.value = String(vlm.temperature);
     if (el.vlmMaxTokens && vlm.max_output_tokens != null) el.vlmMaxTokens.value = String(vlm.max_output_tokens);
+
+    const stt = s.stt || {};
+    setModelList('stt', stt.model_list || [], String(stt.model || ''));
+    if (el.sttLanguage) el.sttLanguage.value = String(stt.language || 'ja-JP');
+
+    const vad = stt.vad || {};
+    if (el.vadThreshold) el.vadThreshold.value = vad.threshold != null ? String(vad.threshold) : '0.5';
+    if (el.vadSilenceThreshold) el.vadSilenceThreshold.value = vad.silence_threshold != null ? String(vad.silence_threshold) : '';
+    if (el.vadMinSpeechMs) el.vadMinSpeechMs.value = vad.min_speech_ms != null ? String(vad.min_speech_ms) : '200';
+    if (el.vadMinSilenceMs) el.vadMinSilenceMs.value = vad.min_silence_ms != null ? String(vad.min_silence_ms) : '350';
+    if (el.vadSpeechPadMs) el.vadSpeechPadMs.value = vad.speech_pad_ms != null ? String(vad.speech_pad_ms) : '120';
+    if (el.vadFrameMs) el.vadFrameMs.value = vad.frame_ms != null ? String(vad.frame_ms) : '32';
+    if (el.vadSampleRate) el.vadSampleRate.value = vad.vad_sample_rate != null ? String(vad.vad_sample_rate) : '16000';
+    if (el.vadMaxBufferMs) el.vadMaxBufferMs.value = vad.max_buffer_ms != null ? String(vad.max_buffer_ms) : '30000';
+    if (el.vadModelPath) el.vadModelPath.value = String(vad.model_path || '');
+    if (el.vadDevice) el.vadDevice.value = String(vad.device || '');
+
+    const fallback = stt.fallback || {};
+    if (el.vadFallbackMinAmp) el.vadFallbackMinAmp.value = fallback.min_amp != null ? String(fallback.min_amp) : '0.008';
+    if (el.vadFallbackMinRms) el.vadFallbackMinRms.value = fallback.min_rms != null ? String(fallback.min_rms) : '0.0015';
+
+    const client = stt.client || {};
+    if (el.sttVoiceRmsThreshold) {
+      el.sttVoiceRmsThreshold.value = client.voice_rms_threshold != null ? String(client.voice_rms_threshold) : '0.006';
+    }
+    if (el.sttSilenceMs) el.sttSilenceMs.value = client.silence_ms != null ? String(client.silence_ms) : '700';
+    if (el.sttMinUtteranceMs) {
+      el.sttMinUtteranceMs.value = client.min_utterance_ms != null ? String(client.min_utterance_ms) : '350';
+    }
+    if (el.sttMaxUtteranceMs) {
+      el.sttMaxUtteranceMs.value = client.max_utterance_ms != null ? String(client.max_utterance_ms) : '12000';
+    }
+    if (el.sttPreRollMs) el.sttPreRollMs.value = client.pre_roll_ms != null ? String(client.pre_roll_ms) : '350';
+    if (el.sttTickMs) el.sttTickMs.value = client.tick_ms != null ? String(client.tick_ms) : '200';
+    if (el.sttBufferSize) el.sttBufferSize.value = client.buffer_size != null ? String(client.buffer_size) : '4096';
+    if (el.sttSubmitTimeoutMs) {
+      el.sttSubmitTimeoutMs.value = client.submit_timeout_ms != null ? String(client.submit_timeout_ms) : '15000';
+    }
+
+    const tts = s.tts || {};
+    const providers = s.providers || {};
+    if (el.ttsProvider) {
+      el.ttsProvider.value = String(tts.provider || providers.tts || 'google');
+    }
+    setModelList('tts', tts.voice_list || [], String(tts.voice || ''));
 
     const toggles = s.toggles || {};
     if (el.sttEnabled) el.sttEnabled.checked = Boolean(toggles.stt);
@@ -1152,6 +1499,51 @@
   async function main() {
     loadPrefs();
     await loadAllSettings();
+
+    if (el.llmModelAddBtn) {
+      el.llmModelAddBtn.onclick = () => {
+        addModelToList('llm', el.llmModelAdd && el.llmModelAdd.value);
+        if (el.llmModelAdd) el.llmModelAdd.value = '';
+      };
+    }
+    if (el.llmModelRemoveBtn) {
+      el.llmModelRemoveBtn.onclick = () => {
+        removeModelFromList('llm', el.llmModel && el.llmModel.value);
+      };
+    }
+    if (el.vlmModelAddBtn) {
+      el.vlmModelAddBtn.onclick = () => {
+        addModelToList('vlm', el.vlmModelAdd && el.vlmModelAdd.value);
+        if (el.vlmModelAdd) el.vlmModelAdd.value = '';
+      };
+    }
+    if (el.vlmModelRemoveBtn) {
+      el.vlmModelRemoveBtn.onclick = () => {
+        removeModelFromList('vlm', el.vlmModel && el.vlmModel.value);
+      };
+    }
+    if (el.sttModelAddBtn) {
+      el.sttModelAddBtn.onclick = () => {
+        addModelToList('stt', el.sttModelAdd && el.sttModelAdd.value);
+        if (el.sttModelAdd) el.sttModelAdd.value = '';
+      };
+    }
+    if (el.sttModelRemoveBtn) {
+      el.sttModelRemoveBtn.onclick = () => {
+        removeModelFromList('stt', el.sttModel && el.sttModel.value);
+      };
+    }
+    if (el.ttsVoiceAddBtn) {
+      el.ttsVoiceAddBtn.onclick = () => {
+        addModelToList('tts', el.ttsVoiceAdd && el.ttsVoiceAdd.value);
+        if (el.ttsVoiceAdd) el.ttsVoiceAdd.value = '';
+      };
+    }
+    if (el.ttsVoiceRemoveBtn) {
+      el.ttsVoiceRemoveBtn.onclick = () => {
+        removeModelFromList('tts', el.ttsVoice && el.ttsVoice.value);
+      };
+    }
 
     await refreshModelIndex();
     if (el.refreshModels) el.refreshModels.onclick = () => refreshModelIndex();

@@ -1,7 +1,8 @@
 param(
   [string]$HostAddr = $env:AITUBER_SERVER_HOST,
   [int]$Port = [int]($env:AITUBER_SERVER_PORT),
-  [switch]$Reload
+  [switch]$Reload,
+  [switch]$Detach
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,4 +54,59 @@ if ($Reload) {
   $args += '--reload'
 }
 
-& .\.venv\Scripts\python.exe @args
+function Wait-Healthy {
+  param(
+    [string]$BaseUrl,
+    [int]$TimeoutSeconds = 10
+  )
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $healthUrl = ($BaseUrl.TrimEnd('/') + '/health')
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $h = Invoke-RestMethod $healthUrl -TimeoutSec 1
+      if ($h -and $h.ok) { return $true }
+    } catch {
+      # ignore
+    }
+    Start-Sleep -Milliseconds 200
+  }
+  return $false
+}
+
+if (-not $Detach) {
+  & .\.venv\Scripts\python.exe @args
+  exit $LASTEXITCODE
+}
+
+# Detached: keep server alive even if this PowerShell session exits.
+if ($Reload) {
+  Write-Host "[run_server] NOTE: -Reload with -Detach is not recommended; running in foreground instead." -ForegroundColor Yellow
+  & .\.venv\Scripts\python.exe @args
+  exit $LASTEXITCODE
+}
+
+$logsDir = 'data/logs'
+if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
+$ts = Get-Date -Format 'yyyyMMdd_HHmmss'
+$outLog = Join-Path $logsDir ("server_" + $ts + ".out.log")
+$errLog = Join-Path $logsDir ("server_" + $ts + ".err.log")
+$pidFile = Join-Path $logsDir 'server.pid'
+
+$py = ".\\.venv\\Scripts\\python.exe"
+$serverProc = Start-Process -FilePath $py -ArgumentList $args -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+$serverProc.Id | Out-File -FilePath $pidFile -Encoding ascii
+
+if (-not (Wait-Healthy -BaseUrl $baseUrl -TimeoutSeconds 15)) {
+  Write-Host "[run_server] Server did not become healthy: $baseUrl" -ForegroundColor Yellow
+  Write-Host "[run_server] Log(out): $outLog" -ForegroundColor Yellow
+  Write-Host "[run_server] Log(err): $errLog" -ForegroundColor Yellow
+  try { Stop-Process -Id $serverProc.Id -Force } catch {}
+  exit 1
+}
+
+Write-Host "[run_server] Server PID: $($serverProc.Id)" -ForegroundColor Gray
+Write-Host "[run_server] Console: $baseUrl/console" -ForegroundColor Green
+Write-Host "[run_server] Stage:   $baseUrl/stage" -ForegroundColor Green
+Write-Host "[run_server] Log(out): $outLog" -ForegroundColor Gray
+Write-Host "[run_server] Log(err): $errLog" -ForegroundColor Gray
+return

@@ -21,11 +21,11 @@
 
 ### 2) モデル配置
 
-`web/models/<name>/` 配下にモデルを配置してください。
+`data/web/models/<name>/` 配下にモデルを配置してください（サーバーが `/models` として配信します）。
 
 例:
-- `web/models/haru/haru.model3.json`
-- `web/models/haru/motions/01_greet.motion3.json`
+- `data/web/models/haru/haru.model3.json`
+- `data/web/models/haru/motions/01_greet.motion3.json`
 
 Stage 側はデフォルトで次のURLを読みにいきます:
 - `/models/<name>/<name>.model3.json`

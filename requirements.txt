@@ -26,5 +26,10 @@ google-cloud-texttospeech>=2.16
 faster-whisper>=1.1
 numpy>=1.26
 
+# VAD (Silero)
+torch>=2.1
+torchaudio>=2.1
+onnxruntime>=1.17
+
 # Optional: title wordcloud generation
 janome>=0.5

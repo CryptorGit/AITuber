@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
 from pydantic import BaseModel, Field
 
 from apps.main.core.settings import load_settings
@@ -36,7 +37,8 @@ from apps.main.tts.service import TTSService
 from apps.main.vlm.screenshot import ScreenshotCapturer
 from apps.main.vlm.summarizer import VLMSummarizer
 from apps.main.llm.gemini_mvp import GeminiMVP
-from apps.main.stt.whisper_service import WhisperConfig, transcribe_pcm, get_model
+from apps.main.stt.vad import VADConfig
+from apps.main.stt.whisper_service import WhisperConfig, transcribe_pcm_with_vad, get_model
 
 
 def _try_inject_motions_into_model3(model3_path: Path) -> None:
@@ -428,6 +430,91 @@ def _parse_int(val: Any) -> Optional[int]:
         return None
 
 
+def _normalize_str_list(val: Any) -> Optional[List[str]]:
+    if not isinstance(val, list):
+        return None
+    out: List[str] = []
+    seen = set()
+    for item in val:
+        s = str(item or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _build_vad_config(
+    *, sr: int, dev: str, audio_ms: int, appcfg: Dict[str, Any], stt_cfg: Optional[Dict[str, Any]] = None
+) -> VADConfig:
+    import os
+
+    raw_stt = appcfg.get("stt") if isinstance(appcfg, dict) else None
+    app_vad = raw_stt.get("vad") if isinstance(raw_stt, dict) else None
+    if not isinstance(app_vad, dict):
+        app_vad = {}
+    stt_cfg = stt_cfg if isinstance(stt_cfg, dict) else {}
+    vad_raw = stt_cfg.get("vad") if isinstance(stt_cfg, dict) else None
+    if not isinstance(vad_raw, dict):
+        vad_raw = {}
+
+    def _pick_float(key: str, env_key: str) -> Optional[float]:
+        val = vad_raw.get(key)
+        if val is None:
+            val = app_vad.get(key)
+        if val is None:
+            val = os.getenv(env_key)
+        return _parse_float(val) if val is not None else None
+
+    def _pick_int(key: str, env_key: str) -> Optional[int]:
+        val = vad_raw.get(key)
+        if val is None:
+            val = app_vad.get(key)
+        if val is None:
+            val = os.getenv(env_key)
+        return _parse_int(val) if val is not None else None
+
+    def _pick_str(key: str, env_key: str) -> Optional[str]:
+        val = vad_raw.get(key)
+        if val is None:
+            val = app_vad.get(key)
+        if val is None:
+            val = os.getenv(env_key)
+        if val is None:
+            return None
+        s = str(val).strip()
+        return s or None
+
+    threshold = _pick_float("threshold", "AITUBER_VAD_THRESHOLD") or 0.5
+    silence_threshold = _pick_float("silence_threshold", "AITUBER_VAD_SILENCE_THRESHOLD")
+    min_speech_ms = _pick_int("min_speech_ms", "AITUBER_VAD_MIN_SPEECH_MS") or 200
+    min_silence_ms = _pick_int("min_silence_ms", "AITUBER_VAD_MIN_SILENCE_MS") or 350
+    speech_pad_ms = _pick_int("speech_pad_ms", "AITUBER_VAD_SPEECH_PAD_MS") or 120
+    frame_ms = _pick_int("frame_ms", "AITUBER_VAD_FRAME_MS") or 32
+    vad_sample_rate = _pick_int("vad_sample_rate", "AITUBER_VAD_SAMPLE_RATE") or 8000
+    max_buffer_ms = _pick_int("max_buffer_ms", "AITUBER_VAD_MAX_BUFFER_MS")
+    if max_buffer_ms is None:
+        max_buffer_ms = max(30000, audio_ms + 1000) if audio_ms else 30000
+
+    model_path = _pick_str("model_path", "AITUBER_VAD_MODEL_PATH")
+    device_override = _pick_str("device", "AITUBER_VAD_DEVICE")
+    device = device_override or ("cuda" if dev == "cuda" else "cpu")
+
+    return VADConfig(
+        sample_rate=sr,
+        vad_sample_rate=vad_sample_rate,
+        threshold=threshold,
+        silence_threshold=silence_threshold,
+        min_speech_ms=min_speech_ms,
+        min_silence_ms=min_silence_ms,
+        speech_pad_ms=speech_pad_ms,
+        frame_ms=frame_ms,
+        max_buffer_ms=max_buffer_ms,
+        device=device,
+        model_path=model_path,
+    )
+
+
 _STT_BAD_PHRASES = [
     "\u3054\u8996\u8074\u3042\u308a\u304c\u3068\u3046\u3054\u3056\u3044\u307e\u3057\u305f[!！。.\\s]*",
     "\u3054\u6e05\u8074\u3042\u308a\u304c\u3068\u3046\u3054\u3056\u3044\u307e\u3057\u305f[!！。.\\s]*",
@@ -481,14 +568,15 @@ def _resolve_safe_path(p: str) -> Optional[Path]:
         return None
 
 
-def _web_models_root() -> Path:
-    return _repo_root() / "web" / "main" / "models"
+def _web_models_root(*, data_dir: Path) -> Path:
+    # Keep large/non-code assets under data/ (not under apps/).
+    return Path(data_dir) / "web" / "models"
 
 
 def _safe_models_relpath(p: str) -> Optional[Path]:
     """Sanitize a user-provided models-relative path.
 
-    Only allow paths under web/main/models.
+    Only allow safe relative paths under the models root.
     """
     try:
         raw = Path(str(p or "").replace("\\", "/"))
@@ -932,6 +1020,11 @@ class ProviderUpdateIn(BaseModel):
 
 
 app = FastAPI(title="AITuber MVP Server")
+
+# Prevent unbounded pileups when multiple /stt/audio requests arrive while a
+# slow CPU transcription is running.
+_stt_single_flight = threading.Semaphore(1)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -965,17 +1058,27 @@ def _startup() -> None:
     _start_vlm_periodic_thread()
 
 
+class _NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Dict[str, Any]) -> Response:
+        resp = await super().get_response(path, scope)
+        try:
+            resp.headers["Cache-Control"] = "no-store"
+        except Exception:
+            pass
+        return resp
+
+
 # Static mounts
 # NOTE: We keep these mounts (as requested) for simple asset delivery.
 # /stage and /console are served via web/index.html which redirects to stage.html/console.html.
 Path("web/main").mkdir(parents=True, exist_ok=True)
 Path("data/audio").mkdir(parents=True, exist_ok=True)
-app.mount("/stage", StaticFiles(directory="web/main", html=True), name="stage")
-app.mount("/console", StaticFiles(directory="web/main", html=True), name="console")
-# NOTE: /models is optional; create the folder only when the user uploads models.
+app.mount("/stage", _NoCacheStaticFiles(directory="web/main", html=True), name="stage")
+app.mount("/console", _NoCacheStaticFiles(directory="web/main", html=True), name="console")
+# NOTE: /models is served from data/ so models are not stored under apps/.
 try:
-    if Path("web/main/models").is_dir():
-        app.mount("/models", StaticFiles(directory="web/main/models", html=True), name="models")
+    Path("data/web/models").mkdir(parents=True, exist_ok=True)
+    app.mount("/models", StaticFiles(directory="data/web/models", html=True), name="models")
 except Exception:
     pass
 app.mount("/audio", StaticFiles(directory="data/audio", html=True), name="audio")
@@ -994,11 +1097,12 @@ def root() -> RedirectResponse:
 
 @app.get("/api/models/index")
 def models_index() -> Dict[str, Any]:
-    """List available .model3.json files under web/models.
+    """List available .model3.json files under data/web/models.
 
     Returned paths are relative to /models.
     """
-    root = _web_models_root()
+    settings = load_settings()
+    root = _web_models_root(data_dir=settings.data_dir)
     if not root.is_dir():
         return {"ok": True, "items": []}
 
@@ -1021,12 +1125,13 @@ def models_index() -> Dict[str, Any]:
 async def models_upload(
     files: List[UploadFile] = File(...),
 ) -> Dict[str, Any]:
-    """Upload a model folder from the browser into web/models.
+    """Upload a model folder from the browser into data/web/models.
 
     The client should send each file with filename=webkitRelativePath.
-    Security: paths are sanitized to stay inside web/models.
+    Security: paths are sanitized to stay inside data/web/models.
     """
-    root = _web_models_root()
+    settings = load_settings()
+    root = _web_models_root(data_dir=settings.data_dir)
     root.mkdir(parents=True, exist_ok=True)
 
     written: List[str] = []
@@ -1116,8 +1221,9 @@ def _normalize_console_settings_payload(payload: Dict[str, Any]) -> Dict[str, An
 
     providers_in = payload.get("providers")
     if isinstance(providers_in, dict):
-        # Keep only LLM/TTS; STT is hard-locked to local whisper-turbo.
         providers: Dict[str, Any] = {}
+        if "stt" in providers_in:
+            providers["stt"] = str(providers_in.get("stt") or "").strip().lower()
         if "llm" in providers_in:
             providers["llm"] = str(providers_in.get("llm") or "").strip().lower()
         if "tts" in providers_in:
@@ -1134,6 +1240,10 @@ def _normalize_console_settings_payload(payload: Dict[str, Any]) -> Dict[str, An
             llm["character_prompt"] = str(llm_in.get("character_prompt") or "")
         if "model" in llm_in:
             llm["model"] = str(llm_in.get("model") or "")
+        if "model_list" in llm_in:
+            llm_list = _normalize_str_list(llm_in.get("model_list"))
+            if llm_list is not None:
+                llm["model_list"] = llm_list
         if "temperature" in llm_in:
             llm["temperature"] = _parse_float(llm_in.get("temperature"))
         if "max_output_tokens" in llm_in:
@@ -1148,6 +1258,10 @@ def _normalize_console_settings_payload(payload: Dict[str, Any]) -> Dict[str, An
             vlm["system_prompt"] = str(vlm_in.get("system_prompt") or "")
         if "model" in vlm_in:
             vlm["model"] = str(vlm_in.get("model") or "")
+        if "model_list" in vlm_in:
+            vlm_list = _normalize_str_list(vlm_in.get("model_list"))
+            if vlm_list is not None:
+                vlm["model_list"] = vlm_list
         if "temperature" in vlm_in:
             vlm["temperature"] = _parse_float(vlm_in.get("temperature"))
         if "max_output_tokens" in vlm_in:
@@ -1178,6 +1292,93 @@ def _normalize_console_settings_payload(payload: Dict[str, Any]) -> Dict[str, An
             rag["short_term_turns_to_prompt"] = _parse_int(rag_in.get("short_term_turns_to_prompt"))
         if rag:
             out["rag"] = rag
+
+    stt_in = payload.get("stt")
+    if isinstance(stt_in, dict):
+        stt: Dict[str, Any] = {}
+        if "model" in stt_in:
+            stt["model"] = str(stt_in.get("model") or "")
+        if "model_list" in stt_in:
+            stt_list = _normalize_str_list(stt_in.get("model_list"))
+            if stt_list is not None:
+                stt["model_list"] = stt_list
+        if "language" in stt_in:
+            stt["language"] = str(stt_in.get("language") or "")
+
+        vad_in = stt_in.get("vad")
+        if isinstance(vad_in, dict):
+            vad: Dict[str, Any] = {}
+            if "threshold" in vad_in:
+                vad["threshold"] = _parse_float(vad_in.get("threshold"))
+            if "silence_threshold" in vad_in:
+                vad["silence_threshold"] = _parse_float(vad_in.get("silence_threshold"))
+            if "min_speech_ms" in vad_in:
+                vad["min_speech_ms"] = _parse_int(vad_in.get("min_speech_ms"))
+            if "min_silence_ms" in vad_in:
+                vad["min_silence_ms"] = _parse_int(vad_in.get("min_silence_ms"))
+            if "speech_pad_ms" in vad_in:
+                vad["speech_pad_ms"] = _parse_int(vad_in.get("speech_pad_ms"))
+            if "frame_ms" in vad_in:
+                vad["frame_ms"] = _parse_int(vad_in.get("frame_ms"))
+            if "vad_sample_rate" in vad_in:
+                vad["vad_sample_rate"] = _parse_int(vad_in.get("vad_sample_rate"))
+            if "max_buffer_ms" in vad_in:
+                vad["max_buffer_ms"] = _parse_int(vad_in.get("max_buffer_ms"))
+            if "model_path" in vad_in:
+                vad["model_path"] = str(vad_in.get("model_path") or "")
+            if "device" in vad_in:
+                vad["device"] = str(vad_in.get("device") or "")
+            if vad:
+                stt["vad"] = vad
+
+        client_in = stt_in.get("client")
+        if isinstance(client_in, dict):
+            client: Dict[str, Any] = {}
+            if "voice_rms_threshold" in client_in:
+                client["voice_rms_threshold"] = _parse_float(client_in.get("voice_rms_threshold"))
+            if "silence_ms" in client_in:
+                client["silence_ms"] = _parse_int(client_in.get("silence_ms"))
+            if "min_utterance_ms" in client_in:
+                client["min_utterance_ms"] = _parse_int(client_in.get("min_utterance_ms"))
+            if "max_utterance_ms" in client_in:
+                client["max_utterance_ms"] = _parse_int(client_in.get("max_utterance_ms"))
+            if "pre_roll_ms" in client_in:
+                client["pre_roll_ms"] = _parse_int(client_in.get("pre_roll_ms"))
+            if "tick_ms" in client_in:
+                client["tick_ms"] = _parse_int(client_in.get("tick_ms"))
+            if "buffer_size" in client_in:
+                client["buffer_size"] = _parse_int(client_in.get("buffer_size"))
+            if "submit_timeout_ms" in client_in:
+                client["submit_timeout_ms"] = _parse_int(client_in.get("submit_timeout_ms"))
+            if client:
+                stt["client"] = client
+
+        fallback_in = stt_in.get("fallback")
+        if isinstance(fallback_in, dict):
+            fallback: Dict[str, Any] = {}
+            if "min_amp" in fallback_in:
+                fallback["min_amp"] = _parse_float(fallback_in.get("min_amp"))
+            if "min_rms" in fallback_in:
+                fallback["min_rms"] = _parse_float(fallback_in.get("min_rms"))
+            if fallback:
+                stt["fallback"] = fallback
+
+        if stt:
+            out["stt"] = stt
+
+    tts_in = payload.get("tts")
+    if isinstance(tts_in, dict):
+        tts: Dict[str, Any] = {}
+        if "provider" in tts_in:
+            tts["provider"] = str(tts_in.get("provider") or "").strip().lower()
+        if "voice" in tts_in:
+            tts["voice"] = str(tts_in.get("voice") or "")
+        if "voice_list" in tts_in:
+            voice_list = _normalize_str_list(tts_in.get("voice_list"))
+            if voice_list is not None:
+                tts["voice_list"] = voice_list
+        if tts:
+            out["tts"] = tts
 
     return out
 
@@ -1213,15 +1414,18 @@ def config_save_all(payload: Dict[str, Any]) -> Dict[str, Any]:
 def config_load_all() -> Dict[str, Any]:
     settings = load_settings()
     appcfg = _load_app_yaml(Path("config/main/app.yaml"))
+    console_cfg = _load_console_settings(settings)
     raw = _load_console_settings(settings)
 
-    # Providers are intentionally locked for this workflow:
-    # - LLM: Gemini
-    # - TTS: Google Cloud TTS
+    providers_raw = raw.get("providers") if isinstance(raw, dict) else {}
     providers: Dict[str, Any] = {
-        "stt": "local",  # hard-locked to faster-whisper large-v3-turbo
-        "llm": "gemini",
-        "tts": "google",
+        "stt": str((providers_raw.get("stt") if isinstance(providers_raw, dict) else "") or "local").strip().lower(),
+        "llm": str((providers_raw.get("llm") if isinstance(providers_raw, dict) else "") or settings.llm_provider or "gemini")
+        .strip()
+        .lower(),
+        "tts": str((providers_raw.get("tts") if isinstance(providers_raw, dict) else "") or settings.tts_provider or "google")
+        .strip()
+        .lower(),
     }
 
     llm_raw = raw.get("llm") if isinstance(raw, dict) else {}
@@ -1241,6 +1445,12 @@ def config_load_all() -> Dict[str, Any]:
         llm_raw.get("model")
         if isinstance(llm_raw, dict) and "model" in llm_raw
         else default_llm_model
+    )
+    llm_model = str(llm_model or "").strip() or default_llm_model
+    llm_list = (
+        llm_raw.get("model_list")
+        if isinstance(llm_raw, dict) and isinstance(llm_raw.get("model_list"), list)
+        else None
     )
     llm_temp = (
         llm_raw.get("temperature")
@@ -1268,6 +1478,12 @@ def config_load_all() -> Dict[str, Any]:
         if isinstance(vlm_raw, dict) and "model" in vlm_raw
         else settings.gemini_model
     )
+    vlm_model = str(vlm_model or "").strip() or settings.gemini_model
+    vlm_list = (
+        vlm_raw.get("model_list")
+        if isinstance(vlm_raw, dict) and isinstance(vlm_raw.get("model_list"), list)
+        else None
+    )
     vlm_temp = (
         vlm_raw.get("temperature")
         if isinstance(vlm_raw, dict) and "temperature" in vlm_raw and vlm_raw.get("temperature") is not None
@@ -1282,6 +1498,41 @@ def config_load_all() -> Dict[str, Any]:
     )
     if vlm_max_tokens is None:
         vlm_max_tokens = 256
+
+    stt_raw = raw.get("stt") if isinstance(raw, dict) else {}
+    stt_model = (
+        str(stt_raw.get("model") or "").strip()
+        if isinstance(stt_raw, dict) and "model" in stt_raw
+        else "large-v3-turbo"
+    )
+    stt_model = stt_model or "base"
+    stt_language = (
+        str(stt_raw.get("language") or "").strip()
+        if isinstance(stt_raw, dict) and "language" in stt_raw
+        else "ja-JP"
+    )
+    stt_language = stt_language or "ja-JP"
+    stt_list = (
+        stt_raw.get("model_list")
+        if isinstance(stt_raw, dict) and isinstance(stt_raw.get("model_list"), list)
+        else None
+    )
+    vad_raw = stt_raw.get("vad") if isinstance(stt_raw, dict) else {}
+    client_raw = stt_raw.get("client") if isinstance(stt_raw, dict) else {}
+    fallback_raw = stt_raw.get("fallback") if isinstance(stt_raw, dict) else {}
+
+    tts_raw = raw.get("tts") if isinstance(raw, dict) else {}
+    tts_voice = (
+        str(tts_raw.get("voice") or "").strip()
+        if isinstance(tts_raw, dict) and "voice" in tts_raw
+        else settings.tts_voice
+    )
+    tts_voice = tts_voice or settings.tts_voice
+    tts_voice_list = (
+        tts_raw.get("voice_list")
+        if isinstance(tts_raw, dict) and isinstance(tts_raw.get("voice_list"), list)
+        else None
+    )
 
     toggles_raw = raw.get("toggles") if isinstance(raw, dict) else {}
     toggles = {
@@ -1312,6 +1563,30 @@ def config_load_all() -> Dict[str, Any]:
         if val is not None:
             short_term_turns_to_prompt = val
 
+    default_llm_models = [
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]
+    default_vlm_models = list(default_llm_models)
+    default_stt_models = ["large-v3-turbo", "large-v3", "medium", "small", "base", "tiny"]
+    default_tts_voices = [
+        "ja-JP-Neural2-B",
+        "ja-JP-Neural2-D",
+        "ja-JP-Standard-A",
+        "ja-JP-Standard-B",
+    ]
+
+    if llm_list is None:
+        llm_list = default_llm_models
+    if vlm_list is None:
+        vlm_list = default_vlm_models
+    if stt_list is None:
+        stt_list = default_stt_models
+    if tts_voice_list is None:
+        tts_voice_list = default_tts_voices
+
     return {
         "ok": True,
         "settings": {
@@ -1320,14 +1595,60 @@ def config_load_all() -> Dict[str, Any]:
                 "system_prompt": llm_sys,
                 "character_prompt": llm_char,
                 "model": llm_model,
+                "model_list": llm_list,
                 "temperature": llm_temp,
                 "max_output_tokens": llm_max_tokens,
             },
             "vlm": {
                 "system_prompt": vlm_sys,
                 "model": vlm_model,
+                "model_list": vlm_list,
                 "temperature": vlm_temp,
                 "max_output_tokens": vlm_max_tokens,
+            },
+            "stt": {
+                "model": stt_model,
+                "model_list": stt_list,
+                "language": stt_language,
+                "vad": {
+                    "threshold": _parse_float(vad_raw.get("threshold")) if isinstance(vad_raw, dict) else None,
+                    "silence_threshold": _parse_float(vad_raw.get("silence_threshold")) if isinstance(vad_raw, dict) else None,
+                    "min_speech_ms": _parse_int(vad_raw.get("min_speech_ms")) if isinstance(vad_raw, dict) else None,
+                    "min_silence_ms": _parse_int(vad_raw.get("min_silence_ms")) if isinstance(vad_raw, dict) else None,
+                    "speech_pad_ms": _parse_int(vad_raw.get("speech_pad_ms")) if isinstance(vad_raw, dict) else None,
+                    "frame_ms": _parse_int(vad_raw.get("frame_ms")) if isinstance(vad_raw, dict) else None,
+                    "vad_sample_rate": _parse_int(vad_raw.get("vad_sample_rate")) if isinstance(vad_raw, dict) else None,
+                    "max_buffer_ms": _parse_int(vad_raw.get("max_buffer_ms")) if isinstance(vad_raw, dict) else None,
+                    "model_path": str(vad_raw.get("model_path") or "") if isinstance(vad_raw, dict) else "",
+                    "device": str(vad_raw.get("device") or "") if isinstance(vad_raw, dict) else "",
+                },
+                "client": {
+                    "voice_rms_threshold": _parse_float(client_raw.get("voice_rms_threshold"))
+                    if isinstance(client_raw, dict)
+                    else None,
+                    "silence_ms": _parse_int(client_raw.get("silence_ms")) if isinstance(client_raw, dict) else None,
+                    "min_utterance_ms": _parse_int(client_raw.get("min_utterance_ms"))
+                    if isinstance(client_raw, dict)
+                    else None,
+                    "max_utterance_ms": _parse_int(client_raw.get("max_utterance_ms"))
+                    if isinstance(client_raw, dict)
+                    else None,
+                    "pre_roll_ms": _parse_int(client_raw.get("pre_roll_ms")) if isinstance(client_raw, dict) else None,
+                    "tick_ms": _parse_int(client_raw.get("tick_ms")) if isinstance(client_raw, dict) else None,
+                    "buffer_size": _parse_int(client_raw.get("buffer_size")) if isinstance(client_raw, dict) else None,
+                    "submit_timeout_ms": _parse_int(client_raw.get("submit_timeout_ms"))
+                    if isinstance(client_raw, dict)
+                    else None,
+                },
+                "fallback": {
+                    "min_amp": _parse_float(fallback_raw.get("min_amp")) if isinstance(fallback_raw, dict) else None,
+                    "min_rms": _parse_float(fallback_raw.get("min_rms")) if isinstance(fallback_raw, dict) else None,
+                },
+            },
+            "tts": {
+                "provider": providers.get("tts") or "google",
+                "voice": tts_voice,
+                "voice_list": tts_voice_list,
             },
             "toggles": toggles,
             "rag": {
@@ -2433,6 +2754,7 @@ async def stt_audio(
     """
     settings = load_settings()
     appcfg = _load_app_yaml(Path("config/main/app.yaml"))
+    console_cfg = _load_console_settings(settings)
     data_dir = settings.data_dir
     events_path = data_dir / "events.jsonl"
     writer = JsonlWriter(events_path)
@@ -2445,6 +2767,12 @@ async def stt_audio(
     audio_bytes = await file.read()
     if not audio_bytes:
         return STTAudioOut(ok=False, text="", error="empty_audio").model_dump(mode="json")
+
+    req_t0 = time.perf_counter()
+    try:
+        print(f"[stt/audio] start run_id={run_id} bytes={len(audio_bytes)} lang={lang} whisper_device={whisper_device}")
+    except Exception:
+        pass
 
     # Parse WAV -> float32 mono
     try:
@@ -2468,6 +2796,11 @@ async def stt_audio(
         audio = (audio_i16.astype(np.float32) / 32768.0).clip(-1.0, 1.0)
         sr = int(framerate)
     except Exception as e:
+        try:
+            dt = int((time.perf_counter() - req_t0) * 1000.0)
+            print(f"[stt/audio] invalid_wav run_id={run_id} dt_ms={dt} err={type(e).__name__}")
+        except Exception:
+            pass
         return STTAudioOut(ok=False, text="", error=f"invalid_wav:{type(e).__name__}"[:200]).model_dump(mode="json")
 
     # Quick audio stats for diagnostics + safe silence gating.
@@ -2481,6 +2814,11 @@ async def stt_audio(
     # If it's essentially silence, skip Whisper to avoid hallucinations and reduce load.
     # Thresholds are intentionally conservative to avoid dropping quiet speech.
     if audio_ms >= 200 and (max_amp < 0.004 and rms < 0.001):
+        try:
+            dt = int((time.perf_counter() - req_t0) * 1000.0)
+            print(f"[stt/audio] no_voice run_id={run_id} dt_ms={dt} audio_ms={audio_ms} sr={sr} rms={rms:.6f} max_amp={max_amp:.6f}")
+        except Exception:
+            pass
         return STTAudioOut(
             ok=False,
             text="",
@@ -2488,12 +2826,40 @@ async def stt_audio(
             debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms},
         ).model_dump(mode="json")
 
-    # STT/VAD are hard-locked to faster-whisper (large-v3-turbo) with Whisper's internal VAD.
-    language = (lang or "ja-JP").split("-")[0].lower() or "ja"
+    stt_cfg = console_cfg.get("stt") if isinstance(console_cfg, dict) else {}
+    stt_model = (
+        str(stt_cfg.get("model") or "").strip()
+        if isinstance(stt_cfg, dict) and "model" in stt_cfg
+        else ""
+    )
+    default_lang = (
+        str(stt_cfg.get("language") or "").strip()
+        if isinstance(stt_cfg, dict) and "language" in stt_cfg
+        else "ja-JP"
+    )
+
+    # STT/VAD use faster-whisper + Silero VAD (configurable via console settings).
+    language = (lang or default_lang or "ja-JP").split("-")[0].lower() or "ja"
     dev = (whisper_device or "cpu").strip().lower()
     dev = "cuda" if dev in ("cuda", "gpu") else "cpu"
     compute_type = "float16" if dev == "cuda" else "int8"
-    cfg = WhisperConfig(model="large-v3-turbo", device=dev, compute_type=compute_type, language=language)
+    # CPU + large models can take minutes per utterance and will cause the web UI
+    # to look stuck (timeouts/retries). Default to a CPU-friendly model unless the
+    # user explicitly set one in console settings.
+    if not stt_model:
+        stt_model = "large-v3-turbo" if dev == "cuda" else "base"
+
+    cfg = WhisperConfig(model=stt_model, device=dev, compute_type=compute_type, language=language)
+    try:
+        vad_cfg = _build_vad_config(sr=sr, dev=dev, audio_ms=audio_ms, appcfg=appcfg, stt_cfg=stt_cfg)
+    except ValueError as e:
+        return STTAudioOut(ok=False, text="", error=f"vad_config:{type(e).__name__}").model_dump(mode="json")
+    fallback_raw = stt_cfg.get("fallback") if isinstance(stt_cfg, dict) else {}
+    fallback_min_amp = _parse_float(fallback_raw.get("min_amp")) if isinstance(fallback_raw, dict) else None
+    fallback_min_rms = _parse_float(fallback_raw.get("min_rms")) if isinstance(fallback_raw, dict) else None
+    min_amp = fallback_min_amp if fallback_min_amp is not None else 0.008
+    min_rms = fallback_min_rms if fallback_min_rms is not None else 0.0015
+    allow_fallback = bool(audio_ms and (max_amp >= min_amp or rms >= min_rms))
 
     force_vlm = _parse_bool_flag(vlm_force, default=False)
     vlm_task = None
@@ -2519,47 +2885,31 @@ async def stt_audio(
         except Exception:
             vlm_task = None
 
-    text = ""
-    chunk_count = 0
-    chunk_sec = _clamp_chunk_seconds(settings.stt_chunk_seconds)
     stt_start = time.perf_counter()
-
-    # Avoid over-chunking short audio: it hurts accuracy more than it helps.
-    # For longer audio, chunking keeps latency/memory bounded.
-    chunks: list[tuple[int, Any]]
-    if audio_ms and audio_ms <= 6500:
-        chunks = [(0, audio)]
-    else:
-        try:
-            chunks = list(_iter_audio_chunks(audio, sr, chunk_sec))
-        except Exception:
-            chunks = [(0, audio)]
-
-    texts: list[str] = []
+    vad_meta = {"segments": 0, "speech_ms": 0, "fallback_used": False}
     try:
-        for _idx, chunk in chunks:
-            if not getattr(chunk, "size", 0):
-                continue
-            try:
-                chunk_count += 1
-                part = await anyio.to_thread.run_sync(
-                    functools.partial(
-                        transcribe_pcm,
-                        audio=chunk,
-                        sample_rate=sr,
-                        cfg=cfg,
-                        internal_vad=True,
-                    ),
-                    abandon_on_cancel=True,
-                )
-            except asyncio.CancelledError:
-                raise
-            except ModuleNotFoundError as e:
-                return STTAudioOut(ok=False, text="", error=f"missing_dep:{e.name}").model_dump(mode="json")
-            except Exception as e:
-                return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
-            if part:
-                texts.append(str(part).strip())
+        print(
+            f"[stt/audio] transcribe_start run_id={run_id} sr={sr} audio_ms={audio_ms} model={cfg.model} device={dev} compute={compute_type}"
+        )
+    except Exception:
+        pass
+    acquired = False
+    try:
+        acquired = _stt_single_flight.acquire(blocking=False)
+        if not acquired:
+            return STTAudioOut(ok=False, text="", error="stt_busy").model_dump(mode="json")
+
+        text, vad_meta = await anyio.to_thread.run_sync(
+            functools.partial(
+                transcribe_pcm_with_vad,
+                audio=audio,
+                sample_rate=sr,
+                cfg=cfg,
+                vad_cfg=vad_cfg,
+                allow_fallback=allow_fallback,
+            ),
+            abandon_on_cancel=True,
+        )
     except asyncio.CancelledError:
         if vlm_task is not None:
             try:
@@ -2567,10 +2917,32 @@ async def stt_audio(
             except Exception:
                 pass
         return STTAudioOut(ok=False, text="", error="canceled").model_dump(mode="json")
-
-    text = " ".join([t for t in texts if t]).strip()
+    except ModuleNotFoundError as e:
+        return STTAudioOut(ok=False, text="", error=f"missing_dep:{e.name}").model_dump(mode="json")
+    except RuntimeError as e:
+        msg = str(e)
+        low = msg.lower()
+        if "silero" in low or "vad" in low or "torch" in low:
+            err = "missing_dep:torch" if "torch" in low else "vad_failed"
+            return STTAudioOut(ok=False, text="", error=err).model_dump(mode="json")
+        return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {msg}"[:200]).model_dump(mode="json")
+    except Exception as e:
+        return STTAudioOut(ok=False, text="", error=f"{type(e).__name__}: {e}"[:200]).model_dump(mode="json")
+    finally:
+        if acquired:
+            try:
+                _stt_single_flight.release()
+            except Exception:
+                pass
 
     stt_end = time.perf_counter()
+    try:
+        dt = int((time.perf_counter() - req_t0) * 1000.0)
+        print(
+            f"[stt/audio] transcribe_done run_id={run_id} dt_ms={dt} stt_ms={int((stt_end - stt_start) * 1000.0)} segments={vad_meta.get('segments')} speech_ms={vad_meta.get('speech_ms')}"
+        )
+    except Exception:
+        pass
     _log_phase_timing(
         writer,
         run_id=run_id,
@@ -2582,20 +2954,41 @@ async def stt_audio(
             "provider": "whisper",
             "sr": sr,
             "audio_ms": audio_ms,
-            "chunk_sec": round(float(chunk_sec), 3) if chunk_sec else None,
-            "chunk_count": chunk_count,
-            "whisper": {"model": "large-v3-turbo", "device": dev, "compute_type": compute_type},
+            "whisper": {"model": cfg.model, "device": dev, "compute_type": compute_type},
             "audio_stats": {"max_amp": max_amp, "rms": rms},
+            "vad": {
+                "segments": vad_meta.get("segments"),
+                "speech_ms": vad_meta.get("speech_ms"),
+                "threshold": vad_cfg.threshold,
+                "min_silence_ms": vad_cfg.min_silence_ms,
+                "fallback_min_amp": min_amp,
+                "fallback_min_rms": min_rms,
+                "fallback_used": vad_meta.get("fallback_used"),
+            },
         },
     )
 
     text = _strip_transcript_phrases(text)
     if not text:
+        if vad_meta.get("segments") == 0 and not allow_fallback:
+            return STTAudioOut(
+                ok=False,
+                text="",
+                error="no_voice",
+                debug={
+                    "sr": sr,
+                    "audio_ms": audio_ms,
+                    "max_amp": max_amp,
+                    "rms": rms,
+                    "device": dev,
+                    "vad": vad_meta,
+                },
+            ).model_dump(mode="json")
         return STTAudioOut(
             ok=False,
             text="",
             error="empty_transcript",
-            debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "device": dev},
+            debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "device": dev, "vad": vad_meta},
         ).model_dump(mode="json")
 
     reason = _should_filter_transcript(text)
@@ -2646,7 +3039,7 @@ async def stt_audio(
         error=None,
         vlm_summary=vlm_summary or None,
         timing_ms=timing_ms,
-        debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "device": dev},
+        debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "device": dev, "vad": vad_meta},
     ).model_dump(
         mode="json"
     )
@@ -2654,17 +3047,24 @@ async def stt_audio(
 
 @app.post("/stt/warmup")
 def stt_warmup(payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Warm up local STT (fixed to faster-whisper large-v3-turbo)."""
+    """Warm up local STT (faster-whisper model from console settings)."""
     import os
 
     settings = load_settings()
+    console_cfg = _load_console_settings(settings)
+    stt_cfg = console_cfg.get("stt") if isinstance(console_cfg, dict) else {}
+    stt_model = (
+        str(stt_cfg.get("model") or "").strip()
+        if isinstance(stt_cfg, dict) and "model" in stt_cfg
+        else "large-v3-turbo"
+    )
     requested = str((payload or {}).get("whisper_device") or "").strip().lower()
     # Allow env override for users running server-only.
     device_choice = (requested or os.getenv("AITUBER_WHISPER_DEVICE") or settings.whisper_device or "cpu").strip().lower()
     dev = "cuda" if device_choice in ("gpu", "cuda") else "cpu"
     compute_type = "float16" if dev == "cuda" else "int8"
 
-    cfg = WhisperConfig(model="large-v3-turbo", device=dev, compute_type=compute_type, language="ja")
+    cfg = WhisperConfig(model=stt_model or "large-v3-turbo", device=dev, compute_type=compute_type, language="ja")
     try:
         get_model(cfg)
         return {"ok": True, "provider": "whisper", "model": cfg.model, "device": dev, "compute_type": compute_type}

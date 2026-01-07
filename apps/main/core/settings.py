@@ -152,10 +152,6 @@ def load_settings(*, env_file: Optional[Path] = None) -> Settings:
                     if legacy_env.exists():
                         _load_env_kv_file(legacy_env, override=True)
 
-    # Hard-lock providers regardless of env/console settings.
-    os.environ["AITUBER_LLM_PROVIDER"] = "gemini"
-    os.environ["AITUBER_TTS_PROVIDER"] = "google"
-
     # Resolve GOOGLE_APPLICATION_CREDENTIALS from .env/ folder if not set.
     try:
         repo_root = _find_repo_root(Path(__file__))
@@ -187,9 +183,6 @@ def load_settings(*, env_file: Optional[Path] = None) -> Settings:
 
     settings = Settings()
     _apply_console_settings(settings)
-    # Prevent console settings from reintroducing other providers.
-    settings.llm_provider = "gemini"
-    settings.tts_provider = "google"
     return settings
 
 
@@ -255,12 +248,17 @@ def _apply_console_settings(settings: Settings) -> None:
 
         providers = raw.get("providers")
         if isinstance(providers, dict):
-            # STT is hard-locked; ignore stt provider changes.
             llm = str(providers.get("llm") or "").strip().lower()
             if llm:
                 settings.llm_provider = llm
             tts = str(providers.get("tts") or "").strip().lower()
             if tts:
                 settings.tts_provider = tts
+
+        tts_cfg = raw.get("tts")
+        if isinstance(tts_cfg, dict):
+            voice = str(tts_cfg.get("voice") or "").strip()
+            if voice:
+                settings.tts_voice = voice
     except Exception:
         return

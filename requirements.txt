@@ -21,6 +21,7 @@ Pillow>=10.0
 # Optional providers (graceful fallback if not configured)
 google-genai>=0.6
 google-cloud-texttospeech>=2.16
+google-cloud-speech>=2.26
 
 # STT (local)
 faster-whisper>=1.1

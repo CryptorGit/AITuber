@@ -56,16 +56,6 @@
         font-size: 12px;
         margin-right: 6px;
       }
-      .pendingItem {
-        border-top: 1px solid #eee;
-        padding: 10px 0;
-      }
-      .pendingActions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-        margin-top: 8px;
-      }
       .muted {
         color: #666;
         font-size: 12px;
@@ -216,7 +206,7 @@
 
       <div class="card">
         <h2>STT / VAD</h2>
-        <label>STT model</label>
+        <label>STT（Google / Whisper）</label>
         <select id="sttModel"></select>
         <div style="display:flex; gap:8px; margin-top:6px">
           <input id="sttModelAdd" placeholder="Add STT model" />
@@ -251,44 +241,7 @@
             <label>speech_pad_ms</label>
             <input id="vadSpeechPadMs" type="number" step="10" min="0" />
           </div>
-          <div style="min-width:140px; flex:1">
-            <label>frame_ms</label>
-            <input id="vadFrameMs" type="number" step="1" min="1" />
-          </div>
         </div>
-        <div class="row" style="margin-top:6px">
-          <div style="min-width:160px; flex:1">
-            <label>vad_sample_rate</label>
-            <input id="vadSampleRate" type="number" step="1000" min="8000" />
-          </div>
-          <div style="min-width:160px; flex:1">
-            <label>max_buffer_ms</label>
-            <input id="vadMaxBufferMs" type="number" step="1000" min="1000" />
-          </div>
-          <div style="min-width:160px; flex:1">
-            <label>vad_device</label>
-            <select id="vadDevice">
-              <option value="">auto</option>
-              <option value="cpu">cpu</option>
-              <option value="cuda">cuda</option>
-            </select>
-          </div>
-        </div>
-        <label>vad_model_path (optional)</label>
-        <input id="vadModelPath" placeholder="C:\\models\\silero_vad.jit" />
-
-        <h3>Fallback gating (server)</h3>
-        <div class="row" style="margin-top:6px">
-          <div style="min-width:160px; flex:1">
-            <label>fallback_min_amp</label>
-            <input id="vadFallbackMinAmp" type="number" step="0.0001" min="0" max="1" />
-          </div>
-          <div style="min-width:160px; flex:1">
-            <label>fallback_min_rms</label>
-            <input id="vadFallbackMinRms" type="number" step="0.0001" min="0" max="1" />
-          </div>
-        </div>
-
         <h3>Client segmentation (browser)</h3>
         <div class="row" style="margin-top:6px">
           <div style="min-width:160px; flex:1">
@@ -313,31 +266,14 @@
             <label>pre_roll_ms</label>
             <input id="sttPreRollMs" type="number" step="10" min="0" />
           </div>
-          <div style="min-width:160px; flex:1">
-            <label>tick_ms</label>
-            <input id="sttTickMs" type="number" step="10" min="50" />
-          </div>
         </div>
         <div class="row" style="margin-top:6px">
-          <div style="min-width:160px; flex:1">
-            <label>buffer_size</label>
-            <input id="sttBufferSize" type="number" step="256" min="256" />
-          </div>
           <div style="min-width:180px; flex:1">
             <label>submit_timeout_ms</label>
             <input id="sttSubmitTimeoutMs" type="number" step="1000" min="1000" />
           </div>
         </div>
         <div class="muted" style="margin-top:6px">Save via "Save all settings"</div>
-      </div>
-
-      <div class="card">
-        <h2>モーション</h2>
-        <div class="muted">hotkeys.json のキーを選択して送信します（あとでAPI化）。</div>
-        <label>ホットキー</label>
-        <select id="motionSelect"></select>
-        <button id="motionSend">選択したモーションを送信</button>
-        <div class="muted" id="motionStatus" style="margin-top:8px"></div>
       </div>
 
       <div class="card">
@@ -499,6 +435,6 @@
       </div>
     </div>
 
-    <script src="console.js?v=20260107"></script>
+    <script src="console.js?v=20260107_4"></script>
   </body>
 </html>

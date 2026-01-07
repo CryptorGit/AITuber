@@ -1,4 +1,6 @@
 (() => {
+  const STT_GOOGLE_VALUE = '__google__';
+
   const el = {
     cameraSelect: document.getElementById('cameraSelect'),
     micSelect: document.getElementById('micSelect'),
@@ -10,9 +12,6 @@
     sendManual: document.getElementById('sendManual'),
     speechStatus: document.getElementById('speechStatus'),
     sttText: document.getElementById('sttText'),
-    motionSelect: document.getElementById('motionSelect'),
-    motionSend: document.getElementById('motionSend'),
-    motionStatus: document.getElementById('motionStatus'),
     outOverlay: document.getElementById('outOverlay'),
     outSpeech: document.getElementById('outSpeech'),
     outMeta: document.getElementById('outMeta'),
@@ -140,6 +139,62 @@
     vlm: [],
     tts: [],
   };
+
+  function renderSttSelectOptions(selectEl, whisperModels, selectedModel, selectedProvider) {
+    if (!selectEl) return;
+    const cleaned = normalizeList(whisperModels || []);
+    const selectedIsGoogle = String(selectedProvider || '').trim().toLowerCase() === 'google';
+    const selectedWhisperModel = String(selectedModel || '').trim();
+
+    // Ensure current selection is visible even if not in the list.
+    const items = cleaned.slice();
+    if (selectedWhisperModel && !items.includes(selectedWhisperModel)) items.unshift(selectedWhisperModel);
+
+    selectEl.innerHTML = '';
+
+    // Google option
+    {
+      const opt = document.createElement('option');
+      opt.value = STT_GOOGLE_VALUE;
+      opt.textContent = 'Google';
+      selectEl.appendChild(opt);
+    }
+
+    if (!items.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Whisper-(no models)';
+      selectEl.appendChild(opt);
+    } else {
+      for (const m of items) {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = `Whisper-${m}`;
+        selectEl.appendChild(opt);
+      }
+    }
+
+    if (selectedIsGoogle) {
+      selectEl.value = STT_GOOGLE_VALUE;
+    } else if (selectedWhisperModel) {
+      selectEl.value = selectedWhisperModel;
+    } else if (items.length) {
+      selectEl.value = items[0];
+    } else {
+      selectEl.value = STT_GOOGLE_VALUE;
+    }
+  }
+
+  function getSelectedSttProvider() {
+    const v = el.sttModel ? String(el.sttModel.value || '').trim() : '';
+    return v === STT_GOOGLE_VALUE ? 'google' : 'local';
+  }
+
+  function getSelectedWhisperModel() {
+    const v = el.sttModel ? String(el.sttModel.value || '').trim() : '';
+    if (!v || v === STT_GOOGLE_VALUE) return '';
+    return v;
+  }
 
   function setVlmStatus(msg) {
     if (el.vlmStatus) el.vlmStatus.textContent = msg || '';
@@ -981,33 +1036,6 @@
     warmupStt();
   }
 
-  async function loadHotkeysAndRenderSelect() {
-    if (!el.motionSelect) return;
-    try {
-      const hotkeys = await jsonFetch('./hotkeys.json', { method: 'GET' });
-      const tags = Object.keys(hotkeys || {});
-      el.motionSelect.innerHTML = '';
-      for (const tag of tags) {
-        const opt = document.createElement('option');
-        opt.value = tag;
-        opt.textContent = tag;
-        el.motionSelect.appendChild(opt);
-      }
-      if (!tags.length) {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = '(hotkeys.json が空)';
-        el.motionSelect.appendChild(opt);
-      }
-    } catch {
-      el.motionSelect.innerHTML = '';
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = 'hotkeys.json load failed.';
-      el.motionSelect.appendChild(opt);
-    }
-  }
-
   function setStatusEl(statusEl, msg) {
     if (statusEl) statusEl.textContent = msg || '';
   }
@@ -1088,6 +1116,11 @@
   function setModelList(kind, list, selected) {
     const cleaned = normalizeList(list);
     modelLists[kind] = cleaned;
+    if (kind === 'stt') {
+      const providers = (currentSettings && currentSettings.providers) || {};
+      renderSttSelectOptions(modelSelectForKind(kind), cleaned, selected, providers.stt);
+      return;
+    }
     renderSelectOptions(modelSelectForKind(kind), cleaned, selected, emptyLabelForKind(kind));
   }
 
@@ -1097,6 +1130,11 @@
     const list = modelLists[kind] || [];
     if (!list.includes(v)) list.push(v);
     modelLists[kind] = list;
+    if (kind === 'stt') {
+      const providers = (currentSettings && currentSettings.providers) || {};
+      renderSttSelectOptions(modelSelectForKind(kind), list, v, providers.stt);
+      return;
+    }
     renderSelectOptions(modelSelectForKind(kind), list, v, emptyLabelForKind(kind));
   }
 
@@ -1104,11 +1142,21 @@
     const v = String(value || '').trim();
     const list = modelLists[kind] || [];
     if (!list.includes(v)) {
+      if (kind === 'stt') {
+        const providers = (currentSettings && currentSettings.providers) || {};
+        renderSttSelectOptions(modelSelectForKind(kind), list, '', providers.stt);
+        return;
+      }
       renderSelectOptions(modelSelectForKind(kind), list, '', emptyLabelForKind(kind));
       return;
     }
     const next = list.filter((item) => item !== v);
     modelLists[kind] = next;
+    if (kind === 'stt') {
+      const providers = (currentSettings && currentSettings.providers) || {};
+      renderSttSelectOptions(modelSelectForKind(kind), next, '', providers.stt);
+      return;
+    }
     renderSelectOptions(modelSelectForKind(kind), next, '', emptyLabelForKind(kind));
   }
 
@@ -1132,14 +1180,52 @@
 
     const clientCfg = getSttClientConfig();
     const sttLang = getSttLanguage();
-    const sttModel = String((el.sttModel && el.sttModel.value) || '').trim();
+    const sttProvider = getSelectedSttProvider();
+    const sttModel = getSelectedWhisperModel();
     const ttsProvider = el.ttsProvider ? String(el.ttsProvider.value || '').trim().toLowerCase() : '';
     const ttsVoice = String((el.ttsVoice && el.ttsVoice.value) || '').trim();
     const providers = (currentSettings && currentSettings.providers) || {};
 
+    // Preserve settings for fields whose inputs are not rendered.
+    // This prevents hidden defaults from unintentionally overwriting server config.
+    const existingStt = (currentSettings && currentSettings.stt) || {};
+    const existingVad = existingStt.vad || {};
+    const existingClient = existingStt.client || {};
+    const existingFallback = existingStt.fallback || {};
+
+    const nextVad = {
+      ...existingVad,
+      threshold: vadThreshold ?? existingVad.threshold ?? 0.5,
+      silence_threshold: vadSilenceThreshold ?? existingVad.silence_threshold ?? null,
+      min_speech_ms: vadMinSpeechMs ?? existingVad.min_speech_ms ?? 200,
+      min_silence_ms: vadMinSilenceMs ?? existingVad.min_silence_ms ?? 350,
+      speech_pad_ms: vadSpeechPadMs ?? existingVad.speech_pad_ms ?? 120,
+    };
+    if (el.vadFrameMs) nextVad.frame_ms = vadFrameMs ?? existingVad.frame_ms ?? 32;
+    if (el.vadSampleRate) nextVad.vad_sample_rate = vadSampleRate ?? existingVad.vad_sample_rate ?? 16000;
+    if (el.vadMaxBufferMs) nextVad.max_buffer_ms = vadMaxBufferMs ?? existingVad.max_buffer_ms ?? 30000;
+    if (el.vadModelPath) nextVad.model_path = String((el.vadModelPath && el.vadModelPath.value) || '');
+    if (el.vadDevice) nextVad.device = String((el.vadDevice && el.vadDevice.value) || '');
+
+    const nextClient = {
+      ...existingClient,
+      voice_rms_threshold: clientCfg.voiceRmsThreshold,
+      silence_ms: clientCfg.silenceMs,
+      min_utterance_ms: clientCfg.minUtteranceMs,
+      max_utterance_ms: clientCfg.maxUtteranceMs,
+      pre_roll_ms: clientCfg.preRollMs,
+      submit_timeout_ms: clientCfg.submitTimeoutMs,
+    };
+    if (el.sttTickMs) nextClient.tick_ms = clientCfg.tickMs;
+    if (el.sttBufferSize) nextClient.buffer_size = clientCfg.bufferSize;
+
+    const nextFallback = { ...existingFallback };
+    if (el.vadFallbackMinAmp) nextFallback.min_amp = vadFallbackMinAmp ?? existingFallback.min_amp ?? 0.008;
+    if (el.vadFallbackMinRms) nextFallback.min_rms = vadFallbackMinRms ?? existingFallback.min_rms ?? 0.0015;
+
     return {
       providers: {
-        stt: String(providers.stt || 'local').trim().toLowerCase() || 'local',
+        stt: sttProvider,
         llm: String(providers.llm || 'gemini').trim().toLowerCase() || 'gemini',
         tts: ttsProvider || String(providers.tts || 'google').trim().toLowerCase() || 'google',
       },
@@ -1161,32 +1247,9 @@
         model: sttModel,
         model_list: modelLists.stt || [],
         language: sttLang,
-        vad: {
-          threshold: vadThreshold ?? 0.5,
-          silence_threshold: vadSilenceThreshold ?? null,
-          min_speech_ms: vadMinSpeechMs ?? 200,
-          min_silence_ms: vadMinSilenceMs ?? 350,
-          speech_pad_ms: vadSpeechPadMs ?? 120,
-          frame_ms: vadFrameMs ?? 32,
-          vad_sample_rate: vadSampleRate ?? 16000,
-          max_buffer_ms: vadMaxBufferMs ?? 30000,
-          model_path: String((el.vadModelPath && el.vadModelPath.value) || ''),
-          device: String((el.vadDevice && el.vadDevice.value) || ''),
-        },
-        client: {
-          voice_rms_threshold: clientCfg.voiceRmsThreshold,
-          silence_ms: clientCfg.silenceMs,
-          min_utterance_ms: clientCfg.minUtteranceMs,
-          max_utterance_ms: clientCfg.maxUtteranceMs,
-          pre_roll_ms: clientCfg.preRollMs,
-          tick_ms: clientCfg.tickMs,
-          buffer_size: clientCfg.bufferSize,
-          submit_timeout_ms: clientCfg.submitTimeoutMs,
-        },
-        fallback: {
-          min_amp: vadFallbackMinAmp ?? 0.008,
-          min_rms: vadFallbackMinRms ?? 0.0015,
-        },
+        vad: nextVad,
+        client: nextClient,
+        fallback: nextFallback,
       },
       tts: {
         provider: ttsProvider || 'google',
@@ -1243,7 +1306,12 @@
     if (el.vlmMaxTokens && vlm.max_output_tokens != null) el.vlmMaxTokens.value = String(vlm.max_output_tokens);
 
     const stt = s.stt || {};
+    const providers = s.providers || {};
     setModelList('stt', stt.model_list || [], String(stt.model || ''));
+    if (el.sttModel) {
+      // Re-render with provider so Google can be selected even if not present in model list.
+      renderSttSelectOptions(el.sttModel, stt.model_list || [], String(stt.model || ''), providers.stt);
+    }
     if (el.sttLanguage) el.sttLanguage.value = String(stt.language || 'ja-JP');
 
     const vad = stt.vad || {};
@@ -1281,7 +1349,6 @@
     }
 
     const tts = s.tts || {};
-    const providers = s.providers || {};
     if (el.ttsProvider) {
       el.ttsProvider.value = String(tts.provider || providers.tts || 'google');
     }
@@ -1760,22 +1827,6 @@
         }
       };
     }
-
-    if (el.motionSend) {
-      el.motionSend.onclick = async () => {
-        const tag = String((el.motionSelect && el.motionSelect.value) || '').trim();
-        if (!tag) return;
-        if (el.motionStatus) el.motionStatus.textContent = 'sending...';
-        try {
-          const j = await jsonFetch('/motion', { method: 'POST', body: JSON.stringify({ tag }) });
-          if (el.motionStatus) el.motionStatus.textContent = j && j.ok ? `ok (seq=${j.seq})` : `error: ${(j && j.error) || 'unknown'}`;
-        } catch (e) {
-          if (el.motionStatus) el.motionStatus.textContent = `error: ${e && e.message ? e.message : e}`;
-        }
-      };
-    }
-
-    await loadHotkeysAndRenderSelect();
 
     await loadRagTables();
 

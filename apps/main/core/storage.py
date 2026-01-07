@@ -30,7 +30,7 @@ def read_json(path: Path) -> Optional[JsonDict]:
     try:
         # Use utf-8-sig to tolerate UTF-8 BOM (common on Windows/PowerShell).
         return json.loads(path.read_text(encoding="utf-8-sig"))
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError, OSError, json.JSONDecodeError):
         return None
 
 

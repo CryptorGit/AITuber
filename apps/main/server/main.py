@@ -531,6 +531,52 @@ def _strip_transcript_phrases(text: str) -> str:
     return out.strip()
 
 
+def _transcribe_google_stt(*, audio: np.ndarray, sr: int, language_code: str) -> str:
+    """Transcribe mono float32 PCM using Google Cloud Speech-to-Text.
+
+    Requires GOOGLE_APPLICATION_CREDENTIALS to be set for auth.
+    """
+
+    try:
+        from google.cloud import speech  # type: ignore
+    except Exception as exc:
+        raise ModuleNotFoundError("google-cloud-speech is not installed") from exc
+
+    import numpy as np
+
+    if sr <= 0:
+        return ""
+    if audio is None or getattr(audio, "size", 0) == 0:
+        return ""
+
+    # Convert float32 [-1,1] -> int16 little-endian
+    a = np.asarray(audio, dtype=np.float32)
+    a = np.clip(a, -1.0, 1.0)
+    pcm16 = (a * 32767.0).astype(np.int16)
+    content = pcm16.tobytes()
+
+    client = speech.SpeechClient()
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+        sample_rate_hertz=int(sr),
+        language_code=str(language_code or "ja-JP"),
+        audio_channel_count=1,
+        enable_automatic_punctuation=True,
+    )
+    audio_msg = speech.RecognitionAudio(content=content)
+
+    resp = client.recognize(config=config, audio=audio_msg)
+    parts: List[str] = []
+    for r in getattr(resp, "results", []) or []:
+        alts = getattr(r, "alternatives", None) or []
+        if not alts:
+            continue
+        t = str(getattr(alts[0], "transcript", "") or "").strip()
+        if t:
+            parts.append(t)
+    return " ".join(parts).strip()
+
+
 def _should_filter_transcript(text: str) -> Optional[str]:
     cleaned = (text or "").strip()
     if not cleaned:
@@ -1395,6 +1441,9 @@ def config_save_all(payload: Dict[str, Any]) -> Dict[str, Any]:
     updates: Dict[str, str] = {}
     providers = cleaned.get("providers")
     if isinstance(providers, dict):
+        stt = str(providers.get("stt") or "").strip().lower()
+        if stt:
+            updates["AITUBER_STT_PROVIDER"] = stt
         llm = str(providers.get("llm") or "").strip().lower()
         if llm:
             updates["AITUBER_LLM_PROVIDER"] = llm
@@ -2843,6 +2892,61 @@ async def stt_audio(
     dev = (whisper_device or "cpu").strip().lower()
     dev = "cuda" if dev in ("cuda", "gpu") else "cpu"
     compute_type = "float16" if dev == "cuda" else "int8"
+
+    # Pick STT provider (console settings providers.stt, or env fallback)
+    providers = console_cfg.get("providers") if isinstance(console_cfg, dict) else {}
+    stt_provider = (
+        str(providers.get("stt") or "").strip().lower()
+        if isinstance(providers, dict)
+        else ""
+    )
+    if not stt_provider:
+        try:
+            import os
+
+            stt_provider = str(os.getenv("AITUBER_STT_PROVIDER") or "").strip().lower()
+        except Exception:
+            stt_provider = ""
+    if stt_provider not in {"google", "local", "whisper", ""}:
+        stt_provider = "local"
+    if stt_provider in {"", "whisper"}:
+        stt_provider = "local"
+
+    if stt_provider == "google":
+        # Google STT does not use VAD/Whisper settings.
+        # Keep the same no_voice gating above to avoid costs/hallucinations.
+        try:
+            text = await anyio.to_thread.run_sync(
+                functools.partial(
+                    _transcribe_google_stt,
+                    audio=audio,
+                    sr=sr,
+                    language_code=(lang or default_lang or "ja-JP"),
+                ),
+                abandon_on_cancel=True,
+            )
+            text = _strip_transcript_phrases(text)
+        except ModuleNotFoundError:
+            return STTAudioOut(ok=False, text="", error="google_stt_missing_dep").model_dump(mode="json")
+        except Exception as e:
+            return STTAudioOut(ok=False, text="", error=f"google_stt:{type(e).__name__}"[:200]).model_dump(mode="json")
+
+        reason = _should_filter_transcript(text)
+        if reason is not None:
+            return STTAudioOut(
+                ok=False,
+                text="",
+                error=f"{reason}",
+                debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "provider": "google"},
+            ).model_dump(mode="json")
+
+        return STTAudioOut(
+            ok=True,
+            text=text,
+            error="",
+            debug={"sr": sr, "audio_ms": audio_ms, "max_amp": max_amp, "rms": rms, "provider": "google"},
+        ).model_dump(mode="json")
+
     # CPU + large models can take minutes per utterance and will cause the web UI
     # to look stuck (timeouts/retries). Default to a CPU-friendly model unless the
     # user explicitly set one in console settings.

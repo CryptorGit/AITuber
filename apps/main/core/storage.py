@@ -23,7 +23,22 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8") -> None:
     ensure_parent(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text, encoding=encoding)
-    os.replace(tmp, path)
+    # On Windows, antivirus/indexers can transiently lock files, causing
+    # PermissionError: [WinError 5] on os.replace. Retry briefly.
+    last_exc: Exception | None = None
+    for _ in range(15):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError as e:
+            last_exc = e
+            time.sleep(0.02)
+        except OSError as e:
+            # Some Win32 errors surface as generic OSError.
+            last_exc = e
+            time.sleep(0.02)
+    if last_exc:
+        raise last_exc
 
 
 def read_json(path: Path) -> Optional[JsonDict]:

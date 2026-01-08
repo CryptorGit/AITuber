@@ -40,6 +40,10 @@ from apps.main.llm.gemini_mvp import GeminiMVP
 from apps.main.stt.vad import VADConfig
 from apps.main.stt.whisper_service import WhisperConfig, transcribe_pcm_with_vad, get_model
 
+from lip_sync.curve import build_curve_from_timeline, wav_duration_ms
+from lip_sync.mapper import LipSyncMapper, MouthPose
+from lip_sync.aligner import MFAAligner, WhisperAligner
+
 
 def _try_inject_motions_into_model3(model3_path: Path) -> None:
     """Best-effort: add FileReferences.Motions if missing.
@@ -84,6 +88,132 @@ def _load_app_yaml(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
+
+
+def _load_lip_sync_yaml() -> Dict[str, Any]:
+    path = Path("config/main/lip_sync.yaml")
+    if not path.exists():
+        return {}
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _make_lip_sync_mapper(cfg: Dict[str, Any]) -> LipSyncMapper:
+    mapper_cfg = (cfg or {}).get("mapper", {})
+    closed = mapper_cfg.get("closed", {})
+    vowels = mapper_cfg.get("vowels", {})
+
+    closed_pose = MouthPose(
+        mouth_open=float(closed.get("mouth_open", 0.05)),
+        mouth_form=float(closed.get("mouth_form", 0.0)),
+        smile=0.0,
+    )
+    vowel_map: Dict[str, MouthPose] = {}
+    for k, v in (vowels or {}).items():
+        vowel_map[str(k).lower()] = MouthPose(
+            mouth_open=float((v or {}).get("mouth_open", closed_pose.mouth_open)),
+            mouth_form=float((v or {}).get("mouth_form", closed_pose.mouth_form)),
+            smile=0.0,
+        )
+
+    return LipSyncMapper(
+        vowel_map=vowel_map,
+        closed_pose=closed_pose,
+        consonant_open_scale=float(mapper_cfg.get("consonant_open_scale", 0.7)),
+        default_smile=float(mapper_cfg.get("default_smile", 0.0)),
+        emotion_smile_boost=float(mapper_cfg.get("emotion_smile_boost", 0.15)),
+        emotion_tags=None,
+    )
+
+
+def _generate_lipsync_json_best_effort(
+    *,
+    data_dir: Path,
+    wav_path: Path,
+    text: str,
+    out_json_path: Path,
+) -> Optional[str]:
+    """Return web path like /audio/... or None (never raises)."""
+    try:
+        cfg = _load_lip_sync_yaml()
+        out_cfg = (cfg or {}).get("output", {})
+        smooth_cfg = (cfg or {}).get("smoothing", {})
+        mix_cfg = (cfg or {}).get("mix", {})
+        aligner_cfg = (cfg or {}).get("aligner", {})
+
+        fps = int(out_cfg.get("fps", 60))
+        speech_pad_ms = int(out_cfg.get("speech_pad_ms", 60))
+        attack_ms = int(smooth_cfg.get("attack_ms", 45))
+        release_ms = int(smooth_cfg.get("release_ms", 90))
+        alpha = float(mix_cfg.get("alpha_viseme_open", 0.75))
+
+        duration_ms = wav_duration_ms(wav_path)
+        mapper = _make_lip_sync_mapper(cfg)
+
+        phonemes = None
+        try:
+            aligner_type = str(aligner_cfg.get("type", "none")).lower()
+            if aligner_type == "mfa":
+                mfa_cfg = aligner_cfg.get("mfa", {})
+                dict_path = str(mfa_cfg.get("dict_path", "") or "").strip()
+                acoustic_path = str(mfa_cfg.get("acoustic_model_path", "") or "").strip()
+                if dict_path and acoustic_path:
+                    aligner = MFAAligner(
+                        mfa_exe=str(mfa_cfg.get("mfa_exe", "mfa")),
+                        dict_path=Path(dict_path),
+                        acoustic_model_path=Path(acoustic_path),
+                    )
+                    phonemes = aligner.align(audio_wav_path=wav_path, text=text)
+            elif aligner_type == "whisper":
+                wcfg = aligner_cfg.get("whisper", {})
+                aligner = WhisperAligner(
+                    model_size=str((wcfg or {}).get("model_size", "small") or "small"),
+                    language=str((wcfg or {}).get("language", "ja") or "ja"),
+                    beam_size=int((wcfg or {}).get("beam_size", 1) or 1),
+                    vad_filter=bool((wcfg or {}).get("vad_filter", True)),
+                )
+                phonemes = aligner.align(audio_wav_path=wav_path, text=text)
+        except Exception:
+            phonemes = None
+
+        curve = build_curve_from_timeline(
+            duration_ms=duration_ms,
+            fps=fps,
+            mapper=mapper,
+            phoneme_events=phonemes,
+            viseme_events=None,
+            wav_path_for_envelope=wav_path,
+            alpha_viseme_open=alpha,
+            speech_pad_ms=speech_pad_ms,
+            attack_ms=attack_ms,
+            release_ms=release_ms,
+        )
+        curve.write_json(out_json_path)
+
+        # Compute a stable web path (/audio/...) even if caller mixes relative/absolute Paths.
+        audio_root = (data_dir / "audio")
+        rel = None
+        try:
+            rel = out_json_path.relative_to(audio_root)
+        except Exception:
+            try:
+                rel = out_json_path.resolve().relative_to(audio_root.resolve())
+            except Exception:
+                try:
+                    import os
+
+                    rel = Path(os.path.relpath(str(out_json_path), str(audio_root)))
+                except Exception:
+                    rel = None
+
+        if not rel:
+            return None
+
+        return f"/audio/{str(rel).replace('\\\\', '/')}"
+    except Exception:
+        return None
 
 
 def _get_vlm_system_prompt(*, settings: Settings, appcfg: Dict[str, Any]) -> str:
@@ -1955,8 +2085,11 @@ def overlay_text() -> Dict[str, Any]:
     request_id = str(st.get("request_id") or "")
     tts_queue = st.get("tts_queue") if isinstance(st.get("tts_queue"), list) else []
     tts_queue_version = st.get("tts_queue_version")
-    if tts_version is None:
-        # best-effort fallback: mtime of tts_latest.wav
+    tts_lipsync_path = str(st.get("tts_lipsync_path") or "")
+    # Best-effort legacy fallback: only derive a version from tts_latest.wav when
+    # the current state explicitly points at it. Otherwise the stage may start
+    # playing stale legacy audio while a new response is still generating.
+    if tts_version is None and (tts_path or "").endswith("/audio/tts_latest.wav"):
         try:
             p = settings.data_dir / "audio" / "tts_latest.wav"
             if p.exists():
@@ -1972,6 +2105,7 @@ def overlay_text() -> Dict[str, Any]:
         "request_id": request_id,
         "tts_queue": tts_queue,
         "tts_queue_version": tts_queue_version,
+        "tts_lipsync_path": tts_lipsync_path,
         "updated_at": st.get("updated_at"),
     }
 
@@ -2078,6 +2212,51 @@ def _split_sentences(text: str) -> tuple[list[str], str]:
     return out, rem
 
 
+def _sanitize_speech_text_for_tts(*, text: str) -> str:
+    """Remove common non-speech preambles before sending to TTS.
+
+    We keep this conservative: only strips known boilerplate like the LLM
+    system prompt (which should never be spoken) and short acknowledgements.
+    """
+    import re
+
+    t = (text or "").strip()
+    if not t:
+        return ""
+
+    # Strip an accidentally-echoed system prompt (managed in data/config).
+    try:
+        sys = read_prompt_text(name="llm_system").strip()
+    except Exception:
+        sys = ""
+    if sys:
+        idx = t.find(sys)
+        if 0 <= idx <= 10:
+            t = (t[:idx] + t[idx + len(sys) :]).strip()
+
+    # Strip common acknowledgements that models sometimes prepend.
+    # (Do NOT over-strip; only remove if it appears at the very beginning.)
+    ack_prefixes = (
+        "はい。承知いたしました。",
+        "はい、承知いたしました。",
+        "承知いたしました。",
+        "了解しました。",
+        "了解。",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for p in ack_prefixes:
+            if t.startswith(p):
+                t = t[len(p) :].lstrip()
+                changed = True
+
+    # If the model started by repeating the system prompt in a slightly modified
+    # way (e.g., with extra newlines), also drop leading blank lines.
+    t = re.sub(r"\A\s+", "", t)
+    return t
+
+
 def _build_stream_prompt(*, user_text: str, rag_context: str, vlm_summary: str, system_prompt: str) -> tuple[str, str]:
     sys = (system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
     parts: list[str] = []
@@ -2108,7 +2287,7 @@ def _stream_llm_text(
     if not (settings.gemini_api_key or "").strip():
         return "（Gemini APIキー未設定: フォールバック）"
 
-    timeout_seconds = 12
+    timeout_seconds = 20
     try:
         import concurrent.futures
 
@@ -2130,11 +2309,11 @@ def _stream_llm_text(
             resp = fut.result(timeout=timeout_seconds)
 
         out = (getattr(resp, "text", "") or "").strip()
-        return out or "了解。"
+        return out or "了解しました。"
     except concurrent.futures.TimeoutError:
         return "（Gemini timeout: フォールバック）"
     except Exception:
-        return "了解。"
+        return "了解しました。"
 
 
 @app.get("/state/live2d")
@@ -2401,7 +2580,8 @@ def _apply_output(
     provider = (tts_provider or settings.tts_provider or "stub").strip().lower()
     tts = TTSService(provider=provider, voice=settings.tts_voice)
     tts_start = time.perf_counter()
-    audio_path, tts_used, tts_error = tts.synthesize_with_meta(text=final.speech_text, out_path=audio_path)
+    safe_speech = _sanitize_speech_text_for_tts(text=final.speech_text)
+    audio_path, tts_used, tts_error = tts.synthesize_with_meta(text=safe_speech, out_path=audio_path)
     tts_end = time.perf_counter()
     _log_phase_timing(
         writer,
@@ -2420,6 +2600,22 @@ def _apply_output(
             tts_latest.write_bytes(audio_path.read_bytes())
     except Exception:
         pass
+
+    # Lip sync curve for legacy single-file stage path
+    tts_lipsync_path = ""
+    try:
+        if tts_latest.exists():
+            out_json = tts_latest.with_suffix(".lipsync.json")
+            p = _generate_lipsync_json_best_effort(
+                data_dir=data_dir,
+                wav_path=tts_latest,
+                text=final.speech_text,
+                out_json_path=out_json,
+            )
+            if p:
+                tts_lipsync_path = p
+    except Exception:
+        tts_lipsync_path = ""
 
     # Live2D (optional)
     live2d_result: Dict[str, Any] = {"ok": True, "triggered": []}
@@ -2451,6 +2647,7 @@ def _apply_output(
         "overlay_text": final.overlay_text,
         "audio_path": str(audio_path.as_posix()),
         "tts_path": "/audio/tts_latest.wav",
+        "tts_lipsync_path": tts_lipsync_path,
         "tts_version": int(time.time() * 1000),
         "tts": {"provider": tts_used, "error": tts_error},
         "speech_text": final.speech_text,
@@ -2593,7 +2790,8 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                 "tts_queue": [],
                 "tts_queue_version": int(time.time() * 1000),
                 "tts_path": "",
-                "tts_version": None,
+                # Use 0 as a sentinel (falsy in JS) to avoid legacy fallback.
+                "tts_version": 0,
                 "vlm_summary": (event.vlm_summary or "").strip(),
             }
             write_json(st_path, state)
@@ -2607,7 +2805,7 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                     vlm_summary=(event.vlm_summary or ""),
                 )
 
-                full_text = (out.speech_text or "").strip()
+                full_text = _sanitize_speech_text_for_tts(text=(out.speech_text or ""))
                 overlay_text = (out.overlay_text or full_text[-120:]).strip()
 
                 st_now = read_json(st_path) or {}
@@ -2617,7 +2815,7 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                 st_now["tts_queue"] = []
                 st_now["tts_queue_version"] = int(time.time() * 1000)
                 st_now["tts_path"] = ""
-                st_now["tts_version"] = None
+                st_now["tts_version"] = 0
                 st_now["updated_at"] = utc_iso()
                 write_json(st_path, st_now)
 
@@ -2636,6 +2834,87 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                 audio_root.mkdir(parents=True, exist_ok=True)
                 tts_provider_used = "google"
                 tts = TTSService(provider=tts_provider_used, voice=settings.tts_voice)
+
+                # Prefer click-free single-shot SSML synthesis when configured.
+                tts_mode = str((appcfg.get("tts", {}) or {}).get("mode") or "segments").strip().lower()
+                ssml_break_ms = int((appcfg.get("tts", {}) or {}).get("ssml_break_ms") or 50)
+
+                def _xml_escape(s: str) -> str:
+                    return (
+                        s.replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                        .replace('"', "&quot;")
+                        .replace("'", "&apos;")
+                    )
+
+                def _build_ssml(full: str) -> str:
+                    # Split to sentences and insert tiny breaks. This reduces clicks at boundaries.
+                    rem = (full or "").strip()
+                    parts: List[str] = []
+                    while rem.strip():
+                        sents, rem = _split_sentences(rem)
+                        if not sents:
+                            sents = [rem.strip()]
+                            rem = ""
+                        for s in sents:
+                            s2 = (s or "").strip()
+                            if not s2:
+                                continue
+                            parts.append(_xml_escape(s2))
+                    br = f"<break time=\"{max(0, ssml_break_ms)}ms\"/>"
+                    inner = f" {br} ".join(parts)
+                    return f"<speak>{inner}</speak>"
+
+                if tts_mode == "ssml_full" and (full_text or "").strip():
+                    out_wav = audio_root / "full.wav"
+                    t0 = time.perf_counter()
+                    err = None
+                    provider_used = tts_provider_used
+                    try:
+                        ssml = _build_ssml(full_text)
+                        _p, provider_used, err = tts.synthesize_with_meta(text=ssml, out_path=out_wav, ssml=True)
+                    except Exception as e:
+                        err = f"{type(e).__name__}: {e}"[:200]
+                    t1 = time.perf_counter()
+                    _log_phase_timing(
+                        writer2,
+                        run_id=request_id,
+                        source="tts",
+                        phase="tts_ssml_full",
+                        start=t0,
+                        end=t1,
+                        payload={"provider": provider_used, "error": err, "break_ms": ssml_break_ms},
+                    )
+
+                    if not err:
+                        lipsync_path = ""
+                        try:
+                            out_json = out_wav.with_suffix(".lipsync.json")
+                            p = _generate_lipsync_json_best_effort(
+                                data_dir=settings.data_dir,
+                                wav_path=out_wav,
+                                text=full_text,
+                                out_json_path=out_json,
+                            )
+                            if p:
+                                lipsync_path = p
+                        except Exception:
+                            lipsync_path = ""
+
+                        qv = int(time.time() * 1000)
+                        st_now = read_json(st_path) or {}
+                        st_now["tts_queue"] = []
+                        st_now["tts_queue_version"] = qv
+                        st_now["tts_path"] = f"/audio/segments/{request_id}/full.wav"
+                        st_now["tts_version"] = qv
+                        if lipsync_path:
+                            st_now["tts_lipsync_path"] = lipsync_path
+                        st_now["tts"] = {"provider": provider_used, "error": err, "mode": "ssml_full"}
+                        st_now["updated_at"] = utc_iso()
+                        write_json(st_path, st_now)
+                        return
+
                 seg_idx = 0
                 rem2 = full_text
                 while rem2.strip():
@@ -2674,10 +2953,28 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                         )
                         if err:
                             continue
+
+                        lipsync_path = ""
+                        try:
+                            out_json = out_wav.with_suffix(".lipsync.json")
+                            p = _generate_lipsync_json_best_effort(
+                                data_dir=settings.data_dir,
+                                wav_path=out_wav,
+                                text=s,
+                                out_json_path=out_json,
+                            )
+                            if p:
+                                lipsync_path = p
+                        except Exception:
+                            lipsync_path = ""
+
                         qv = int(time.time() * 1000)
                         st_now = read_json(st_path) or {}
                         q = st_now.get("tts_queue") if isinstance(st_now.get("tts_queue"), list) else []
-                        q.append({"idx": seg_idx, "path": f"/audio/segments/{request_id}/{seg_idx:03d}.wav", "text": s})
+                        item = {"idx": seg_idx, "path": f"/audio/segments/{request_id}/{seg_idx:03d}.wav", "text": s}
+                        if lipsync_path:
+                            item["lipsync_path"] = lipsync_path
+                        q.append(item)
                         st_now["tts_queue"] = q
                         st_now["tts_queue_version"] = qv
                         st_now["tts_path"] = f"/audio/segments/{request_id}/{seg_idx:03d}.wav"
@@ -3272,6 +3569,22 @@ def manager_approve(req: ApproveIn) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Lip sync curve for legacy single-file stage path
+    tts_lipsync_path = ""
+    try:
+        if tts_latest.exists():
+            out_json = tts_latest.with_suffix(".lipsync.json")
+            p = _generate_lipsync_json_best_effort(
+                data_dir=data_dir,
+                wav_path=tts_latest,
+                text=final.speech_text,
+                out_json_path=out_json,
+            )
+            if p:
+                tts_lipsync_path = p
+    except Exception:
+        tts_lipsync_path = ""
+
     # Live2D
     live2d_result: Dict[str, Any] = {"ok": True, "triggered": []}
     try:
@@ -3302,6 +3615,7 @@ def manager_approve(req: ApproveIn) -> Dict[str, Any]:
         "overlay_text": final.overlay_text,
         "audio_path": str(audio_path.as_posix()),
         "tts_path": "/audio/tts_latest.wav",
+        "tts_lipsync_path": tts_lipsync_path,
         "tts_version": int(time.time() * 1000),
         "tts": {"provider": tts_used, "error": tts_error},
         "speech_text": final.speech_text,

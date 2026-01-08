@@ -101,17 +101,22 @@ class GeminiMVP:
         if not (self.api_key or "").strip():
             return self._fallback(user_text=user_text, reason="missing_api_key")
 
-        prompt = self._build_prompt(
+        # IMPORTANT:
+        # Do not inline system prompt into user text. If we do, Gemini often
+        # replies to the system prompt with acknowledgements like
+        # "はい、承知いたしました。日本語で…" which then gets spoken via TTS.
+        sys = (self.system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
+        body = self._build_prompt(
             user_text=user_text,
             rag_context=rag_context,
             vlm_summary=vlm_summary,
-            system_prompt=self.system_prompt,
+            system_prompt=None,
         )
 
         # Hard timeout for external API calls.
         # Windows-compatible (no signal alarm). If the SDK blocks due to retries/backoff,
         # we fall back quickly so the server stays responsive.
-        timeout_seconds = 12
+        timeout_seconds = 20
 
         last_err: Optional[str] = None
         for _attempt in range(2):
@@ -123,16 +128,42 @@ class GeminiMVP:
                 def _call() -> Any:
                     kwargs: Dict[str, Any] = {
                         "model": self.model,
-                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "contents": [{"role": "user", "parts": [{"text": body}]}],
                     }
+
+                    # Best-effort: provide system prompt as a system instruction.
+                    # SDK surface varies; try config-based first.
+                    config: Dict[str, Any] = {}
                     if self.generation_config and isinstance(self.generation_config, dict):
-                        kwargs["config"] = dict(self.generation_config)
+                        config.update(dict(self.generation_config))
+                    if sys:
+                        # Newer google-genai SDK accepts this in config.
+                        config["system_instruction"] = sys
+                    if config:
+                        kwargs["config"] = config
+
                     try:
                         return client.models.generate_content(**kwargs)
                     except TypeError:
-                        # Older SDK variants may not accept config; retry without.
+                        # Older SDK variants may not accept config/system_instruction.
                         kwargs.pop("config", None)
-                        return client.models.generate_content(**kwargs)
+                        try:
+                            # Some variants accept system_instruction at top-level.
+                            if sys:
+                                kwargs2 = dict(kwargs)
+                                kwargs2["system_instruction"] = sys
+                                return client.models.generate_content(**kwargs2)
+                        except TypeError:
+                            pass
+
+                        # Final fallback: inline sys with an explicit instruction
+                        # to avoid acknowledgements.
+                        inline = (sys + "\n\n" if sys else "") + "前置きは不要です。いきなり本文から答えてください。\n\n" + body
+                        kwargs3 = {
+                            "model": self.model,
+                            "contents": [{"role": "user", "parts": [{"text": inline}]}],
+                        }
+                        return client.models.generate_content(**kwargs3)
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                     fut = ex.submit(_call)
@@ -190,7 +221,13 @@ class GeminiMVP:
         vlm_summary: str,
         system_prompt: Optional[str],
     ) -> str:
-        sys = (system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
+        # If system_prompt is None, do NOT inject any system instructions.
+        # Callers may want to provide system instructions via the SDK's
+        # `system_instruction` mechanism instead of inlining.
+        if system_prompt is None:
+            sys = ""
+        else:
+            sys = (system_prompt or "").strip() or read_prompt_text(name="llm_system").strip()
         parts: list[str] = []
         ut = (user_text or "").strip()
         if ut:
@@ -202,7 +239,9 @@ class GeminiMVP:
         if rc:
             parts.append("[RAG]\n" + rc)
         body = "\n\n".join([p for p in parts if p]).strip() or "（入力なし）"
-        return (sys + "\n\n" + body).strip() + "\n"
+        if sys:
+            return (sys + "\n\n" + body).strip() + "\n"
+        return body.strip() + "\n"
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         try:
@@ -217,10 +256,28 @@ class GeminiMVP:
         raise ValueError("No JSON found")
 
     def _fallback(self, *, user_text: str, reason: str) -> LLMOut:
-        t = (user_text or "").strip() or "（入力なし）"
-        overlay = t[:60]
+        t = (user_text or "").strip()
+        if not t:
+            t = "（入力なし）"
+
+        # Deterministic, non-echo fallback: avoid repeating the user's input,
+        # which looks like a broken LLM.
+        low = t.lower()
+        is_greeting = any(
+            k in t
+            for k in (
+                "こんにちは",
+                "こんばんは",
+                "おはよう",
+                "やあ",
+                "はじめまして",
+            )
+        ) or any(k in low for k in ("hello", "hi"))
+
+        speech = "こんにちは。" if is_greeting else "了解しました。"
+        overlay = speech[:60]
         return LLMOut(
-            speech_text=f"了解。{t}",
+            speech_text=speech,
             overlay_text=overlay,
             emotion="neutral",
             motion_tags=["neutral"],

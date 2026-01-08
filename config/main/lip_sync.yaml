@@ -1,0 +1,56 @@
+# Lip sync configuration (audio timeline based)
+
+output:
+  fps: 60
+  speech_pad_ms: 60
+
+smoothing:
+  attack_ms: 45
+  release_ms: 90
+
+# Mix viseme/phoneme-derived openness with audio RMS envelope.
+# 1.0 = only timing (highest precision when timing is accurate)
+# 0.0 = only envelope (robust but less accurate vowel shapes)
+mix:
+  alpha_viseme_open: 0.75
+
+mapper:
+  closed:
+    mouth_open: 0.05
+    mouth_form: 0.0
+  vowels:
+    a: { mouth_open: 0.90, mouth_form: 0.20 }
+    i: { mouth_open: 0.50, mouth_form: 0.90 }
+    u: { mouth_open: 0.40, mouth_form: -0.70 }
+    e: { mouth_open: 0.60, mouth_form: 0.60 }
+    o: { mouth_open: 0.80, mouth_form: -0.40 }
+  consonant_open_scale: 0.70
+  default_smile: 0.0
+  emotion_smile_boost: 0.15
+
+# Forced alignment (optional): configure if your TTS does not return timing.
+aligner:
+  type: none  # none | whisper | mfa
+  whisper:
+    model_size: small   # tiny | base | small | medium | large-v3 (depends on your machine)
+    language: ja
+    beam_size: 1
+    vad_filter: true
+  mfa:
+    mfa_exe: mfa
+    dict_path: ''
+    acoustic_model_path: ''
+
+# Live2D parameter ID candidates (Web stage resolves what exists in the model)
+live2d:
+  mouth_open_candidates:
+    - ParamMouthOpenY
+    - ParamMouthOpen
+    - MouthOpenY
+    - MouthOpen
+  mouth_form_candidates:
+    - ParamMouthForm
+    - MouthForm
+  mouth_smile_candidates:
+    - ParamMouthSmile
+    - MouthSmile

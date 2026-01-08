@@ -27,6 +27,8 @@ vlm:
 tts:
   provider: google   # google|stub
   audio_dir: data/audio
+  mode: ssml_full    # ssml_full|segments
+  ssml_break_ms: 50
 
 live2d:
   enabled: true

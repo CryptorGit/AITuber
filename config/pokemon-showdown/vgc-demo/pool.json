@@ -1,5 +1,899 @@
 {
   "version": 1,
-  "updated_at": "2026-01-09T13:57:09.896Z",
-  "pool": []
+  "updated_at": "2026-01-11T17:30:34.734Z",
+  "team6": [
+    "5b8ae24f-4265-4aac-89a3-d9d3dddcc1db",
+    "e5d6fc3d-79ed-4497-8cca-acb8fe4a97f8",
+    "5c9c2359-4775-4c55-85a3-e84a2e189a43",
+    "4ded217a-7401-4f77-8c62-4bfbfc998334",
+    "57b9cc8f-b989-4626-bb86-ad0a4e0e9c28",
+    "a00d1ce8-e69e-4853-9b81-b5fc3e482aae"
+  ],
+  "pool": [
+    {
+      "id": "5b8ae24f-4265-4aac-89a3-d9d3dddcc1db",
+      "species": "Ninetales-Alola",
+      "setText": "Ninetales-Alola @ Light Clay\nAbility: Snow Warning\nEVs: 252 HP / 4 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Aurora Veil\n- Blizzard\n- Encore\n- Protect"
+    },
+    {
+      "id": "e5d6fc3d-79ed-4497-8cca-acb8fe4a97f8",
+      "species": "Abomasnow",
+      "setText": "Abomasnow @ Sitrus Berry\nAbility: Snow Warning\nEVs: 252 HP / 116 Def / 140 SpD\nCalm Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Aurora Veil\n- Blizzard\n- Giga Drain\n- Protect"
+    },
+    {
+      "id": "5c9c2359-4775-4c55-85a3-e84a2e189a43",
+      "species": "Sinistcha",
+      "setText": "Sinistcha @ Leftovers\nAbility: Hospitality\nEVs: 252 HP / 140 Def / 116 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Rage Powder\n- Matcha Gotcha\n- Strength Sap\n- Protect"
+    },
+    {
+      "id": "4ded217a-7401-4f77-8c62-4bfbfc998334",
+      "species": "Clefairy",
+      "setText": "Clefairy @ Eviolite\nAbility: Friend Guard\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Follow Me\n- Helping Hand\n- Protect\n- Moonblast"
+    },
+    {
+      "id": "57b9cc8f-b989-4626-bb86-ad0a4e0e9c28",
+      "species": "Porygon2",
+      "setText": "Porygon2 @ Eviolite\nAbility: Download\nEVs: 244 HP / 156 Def / 108 SpD\nBold Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Fairy\n- Trick Room\n- Recover\n- Ice Beam\n- Thunderbolt"
+    },
+    {
+      "id": "a00d1ce8-e69e-4853-9b81-b5fc3e482aae",
+      "species": "Sableye",
+      "setText": "Sableye @ Mental Herb\nAbility: Prankster\nEVs: 252 HP / 252 SpD / 4 Spe\nCareful Nature\nLevel: 50\nTera Type: Ghost\n- Will-O-Wisp\n- Taunt\n- Fake Out\n- Recover"
+    },
+    {
+      "id": "9b4d1398-79e9-4617-9ecb-93f488e0d13c",
+      "species": "Murkrow",
+      "setText": "Murkrow @ Eviolite\nAbility: Prankster\nEVs: 252 HP / 4 Def / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Tailwind\n- Haze\n- Taunt\n- Foul Play"
+    },
+    {
+      "id": "3633ecb1-1fd6-49bc-a250-9eed20ea2bc9",
+      "species": "Talonflame",
+      "setText": "Talonflame @ Covert Cloak\nAbility: Gale Wings\nEVs: 252 HP / 4 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Tailwind\n- Brave Bird\n- Will-O-Wisp\n- Protect"
+    },
+    {
+      "id": "381ca37f-87aa-43e6-ba41-e1a2f587355a",
+      "species": "Gothitelle",
+      "setText": "Gothitelle @ Sitrus Berry\nAbility: Shadow Tag\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Dark\n- Fake Out\n- Trick Room\n- Psychic\n- Protect"
+    },
+    {
+      "id": "357e1d5e-0f9f-4fef-9c5b-3a78630d5939",
+      "species": "Mimikyu",
+      "setText": "Mimikyu @ Mental Herb\nAbility: Disguise\nEVs: 252 HP / 4 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Trick Room\n- Will-O-Wisp\n- Play Rough\n- Protect"
+    },
+    {
+      "id": "ac640358-2f0f-4082-9af3-bc813bf76514",
+      "species": "Armarouge",
+      "setText": "Armarouge @ Weakness Policy\nAbility: Flash Fire\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Grass\n- Trick Room\n- Armor Cannon\n- Expanding Force\n- Protect"
+    },
+    {
+      "id": "8ba6a768-546b-4f4c-b439-36f5b0729c6d",
+      "species": "Ceruledge",
+      "setText": "Ceruledge @ Clear Amulet\nAbility: Flash Fire\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Grass\n- Bitter Blade\n- Shadow Sneak\n- Swords Dance\n- Protect"
+    },
+    {
+      "id": "79464e18-5478-457b-bd32-6a84f9f10693",
+      "species": "Annihilape",
+      "setText": "Annihilape @ Leftovers\nAbility: Defiant\nEVs: 252 HP / 196 SpD / 60 Spe\nCareful Nature\nLevel: 50\nTera Type: Water\n- Rage Fist\n- Drain Punch\n- Bulk Up\n- Protect"
+    },
+    {
+      "id": "84324518-66d9-495b-8a12-fa3447a95b96",
+      "species": "Maushold-Four",
+      "setText": "Maushold-Four @ Wide Lens\nAbility: Friend Guard\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Population Bomb\n- Follow Me\n- Taunt\n- Protect"
+    },
+    {
+      "id": "da008038-e86a-414f-b068-a80fb25ca723",
+      "species": "Dragonite",
+      "setText": "Dragonite @ Choice Band\nAbility: Multiscale\nEVs: 4 HP / 252 Atk / 252 Spe\nAdamant Nature\nLevel: 50\nTera Type: Normal\n- Extreme Speed\n- Outrage\n- Earthquake\n- Iron Head"
+    },
+    {
+      "id": "8cc88fdf-ef0c-44b6-8bb6-3f9add19bb4d",
+      "species": "Dragapult",
+      "setText": "Dragapult @ Life Orb\nAbility: Clear Body\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Draco Meteor\n- Shadow Ball\n- Thunderbolt\n- Protect"
+    },
+    {
+      "id": "b7d00c8c-e88a-4afa-ac09-fa363b7e7c98",
+      "species": "Salamence",
+      "setText": "Salamence @ Clear Amulet\nAbility: Intimidate\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Steel\n- Dragon Claw\n- Dual Wingbeat\n- Tailwind\n- Protect"
+    },
+    {
+      "id": "ef3faa16-f434-470c-b0f9-dc009060ab25",
+      "species": "Tyranitar",
+      "setText": "Tyranitar @ Assault Vest\nAbility: Sand Stream\nEVs: 252 HP / 196 Atk / 60 SpD\nAdamant Nature\nLevel: 50\nTera Type: Flying\n- Rock Slide\n- Knock Off\n- Low Kick\n- Tera Blast"
+    },
+    {
+      "id": "7d584fb2-4351-4c4e-b3a2-63e4c94bdfd9",
+      "species": "Scizor",
+      "setText": "Scizor @ Clear Amulet\nAbility: Technician\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Fire\n- Bullet Punch\n- U-turn\n- Close Combat\n- Protect"
+    },
+    {
+      "id": "c9f8828b-81bd-4fa6-96ca-84f026e1bf58",
+      "species": "Aegislash",
+      "setText": "Aegislash @ Leftovers\nAbility: Stance Change\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- King's Shield\n- Shadow Ball\n- Flash Cannon\n- Wide Guard"
+    },
+    {
+      "id": "752ee091-537c-465a-94ff-fae3c2187849",
+      "species": "Milotic",
+      "setText": "Milotic @ Leftovers\nAbility: Competitive\nEVs: 252 HP / 156 Def / 100 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Muddy Water\n- Icy Wind\n- Recover\n- Protect"
+    },
+    {
+      "id": "90faedd3-0635-4ce6-9b3b-fbf59af517cf",
+      "species": "Azumarill",
+      "setText": "Azumarill @ Sitrus Berry\nAbility: Huge Power\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Aqua Jet\n- Play Rough\n- Belly Drum\n- Protect"
+    },
+    {
+      "id": "8710bdc7-e1e0-48ac-83b5-2b1a79352b97",
+      "species": "Venusaur",
+      "setText": "Venusaur @ Focus Sash\nAbility: Chlorophyll\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fire\n- Sleep Powder\n- Leaf Storm\n- Sludge Bomb\n- Protect"
+    },
+    {
+      "id": "cb3bd12d-89f4-41b6-92fc-20ebeccd8bee",
+      "species": "Torkoal",
+      "setText": "Torkoal @ Charcoal\nAbility: Drought\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Grass\n- Eruption\n- Heat Wave\n- Earth Power\n- Protect"
+    },
+    {
+      "id": "1c0a7dd5-1bfe-4ada-b7d8-c696537dcf49",
+      "species": "Lilligant-Hisui",
+      "setText": "Lilligant-Hisui @ Focus Sash\nAbility: Chlorophyll\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- After You\n- Close Combat\n- Leaf Blade\n- Protect"
+    },
+    {
+      "id": "6e192250-de1d-47e1-9dea-71433956e2ff",
+      "species": "Brute Bonnet",
+      "setText": "Brute Bonnet @ Rocky Helmet\nAbility: Protosynthesis\nEVs: 252 HP / 156 Def / 100 SpD\nCareful Nature\nLevel: 50\nTera Type: Water\n- Spore\n- Rage Powder\n- Seed Bomb\n- Sucker Punch"
+    },
+    {
+      "id": "c5504518-aa74-48f7-84d5-31173c4a6aca",
+      "species": "Scream Tail",
+      "setText": "Scream Tail @ Booster Energy\nAbility: Protosynthesis\nEVs: 252 HP / 4 Def / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Icy Wind\n- Encore\n- Helping Hand\n- Protect"
+    },
+    {
+      "id": "92de2e9c-24fa-4828-9ca9-90152181ce5e",
+      "species": "Great Tusk",
+      "setText": "Great Tusk @ Clear Amulet\nAbility: Protosynthesis\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Steel\n- Headlong Rush\n- Close Combat\n- Ice Spinner\n- Protect"
+    },
+    {
+      "id": "46f36ec1-b08d-4c93-b721-2f3b64541903",
+      "species": "Iron Treads",
+      "setText": "Iron Treads @ Assault Vest\nAbility: Quark Drive\nEVs: 252 HP / 116 Atk / 140 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Iron Head\n- High Horsepower\n- Ice Spinner\n- Knock Off"
+    },
+    {
+      "id": "f192c2f4-a05b-40ef-a826-94992366f24a",
+      "species": "Iron Moth",
+      "setText": "Iron Moth @ Booster Energy\nAbility: Quark Drive\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Heat Wave\n- Sludge Wave\n- Energy Ball\n- Protect"
+    },
+    {
+      "id": "d3fec91c-a9f7-43e1-9b9c-9aa6fa778b77",
+      "species": "Iron Jugulis",
+      "setText": "Iron Jugulis @ Safety Goggles\nAbility: Quark Drive\nEVs: 252 HP / 4 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Tailwind\n- Snarl\n- Air Slash\n- Protect"
+    },
+    {
+      "id": "1b5cec6d-a47e-45ff-a16e-9fd786c8c063",
+      "species": "Walking Wake",
+      "setText": "Walking Wake @ Life Orb\nAbility: Protosynthesis\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Hydro Steam\n- Draco Meteor\n- Flamethrower\n- Protect"
+    },
+    {
+      "id": "f8af7dd3-f9de-45a9-af89-abee8fe1d185",
+      "species": "Kommo-o",
+      "setText": "Kommo-o @ Throat Spray\nAbility: Soundproof\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Clanging Scales\n- Aura Sphere\n- Protect\n- Iron Defense"
+    },
+    {
+      "id": "6ae761ff-9b0c-451c-9680-efdca669b88e",
+      "species": "Gengar",
+      "setText": "Gengar @ Focus Sash\nAbility: Cursed Body\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Shadow Ball\n- Sludge Bomb\n- Icy Wind\n- Protect"
+    },
+    {
+      "id": "ecf7a8eb-bb45-4864-9696-0998c15362ce",
+      "species": "Meowscarada",
+      "setText": "Meowscarada @ Focus Sash\nAbility: Overgrow\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Grass\n- Flower Trick\n- Knock Off\n- U-turn\n- Protect"
+    },
+    {
+      "id": "9e414dbe-a4f8-4b11-96e4-d050e449f43e",
+      "species": "Bronzong",
+      "setText": "Bronzong @ Leftovers\nAbility: Levitate\nEVs: 252 HP / 196 Def / 60 SpD\nSassy Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Water\n- Trick Room\n- Body Press\n- Iron Defense\n- Protect"
+    },
+    {
+      "id": "543b71cd-8a4e-4657-b0da-6456a748a947",
+      "species": "Okidogi",
+      "setText": "Okidogi @ Assault Vest\nAbility: Guard Dog\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Drain Punch\n- Knock Off\n- Ice Punch\n- High Horsepower"
+    },
+    {
+      "id": "bf34746c-28bc-49de-bf67-20ff328f1f9c",
+      "species": "Munkidori",
+      "setText": "Munkidori @ Life Orb\nAbility: Toxic Chain\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Sludge Bomb\n- Psychic\n- Icy Wind\n- Protect"
+    },
+    {
+      "id": "a338109a-0eaf-4c47-b0c6-6677d8a38c9c",
+      "species": "Fezandipiti",
+      "setText": "Fezandipiti @ Safety Goggles\nAbility: Toxic Chain\nEVs: 252 HP / 92 Def / 164 Spe\nJolly Nature\nLevel: 50\nTera Type: Steel\n- Tailwind\n- Roost\n- Brave Bird\n- Taunt"
+    },
+    {
+      "id": "f6e9af10-b643-4ffd-abed-3afa274aae61",
+      "species": "Hydrapple",
+      "setText": "Hydrapple @ Leftovers\nAbility: Regenerator\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Fickle Beam\n- Giga Drain\n- Earth Power\n- Protect"
+    },
+    {
+      "id": "e4c8dd83-714a-4e92-998e-21d362603676",
+      "species": "Ribombee",
+      "setText": "Ribombee @ Focus Sash\nAbility: Shield Dust\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Speed Swap\n- Pollen Puff\n- Moonblast\n- Protect"
+    },
+    {
+      "id": "304957b0-d728-41d8-ac7b-0623bd5de0d5",
+      "species": "Overqwil",
+      "setText": "Overqwil @ Black Sludge\nAbility: Intimidate\nEVs: 252 HP / 196 Atk / 60 Spe\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Barb Barrage\n- Crunch\n- Taunt\n- Protect"
+    },
+    {
+      "id": "bc2c9174-30e8-4301-92c8-5bda8949d9bc",
+      "species": "Gliscor",
+      "setText": "Gliscor @ Toxic Orb\nAbility: Poison Heal\nEVs: 244 HP / 180 Def / 84 Spe\nImpish Nature\nLevel: 50\nTera Type: Water\n- Protect\n- Earthquake\n- Knock Off\n- Wide Guard"
+    },
+    {
+      "id": "a43b76fe-81fe-4020-9d25-a7df772abb5d",
+      "species": "Conkeldurr",
+      "setText": "Conkeldurr @ Flame Orb\nAbility: Guts\nEVs: 252 HP / 252 Atk / 4 SpD\nBrave Nature\nIVs: 0 Spe\nLevel: 50\nTera Type: Water\n- Drain Punch\n- Mach Punch\n- Facade\n- Protect"
+    },
+    {
+      "id": "b1344c07-1878-44db-bfde-662b463f1c4d",
+      "species": "Ursaluna",
+      "setText": "Ursaluna @ Flame Orb\nAbility: Guts\nEVs: 252 HP / 252 Atk / 4 SpD\nBrave Nature\nIVs: 0 Spe\nLevel: 50\nTera Type: Normal\n- Facade\n- Headlong Rush\n- Protect\n- Swords Dance"
+    },
+    {
+      "id": "f245abae-deb9-40e8-b72f-3abe9c7295b9",
+      "species": "Basculegion",
+      "setText": "Basculegion @ Choice Band\nAbility: Adaptability\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Wave Crash\n- Last Respects\n- Aqua Jet\n- Flip Turn"
+    },
+    {
+      "id": "0de864f6-6b49-4546-86d6-e0ec55395253",
+      "species": "Araquanid",
+      "setText": "Araquanid @ Assault Vest\nAbility: Water Bubble\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Grass\n- Liquidation\n- Leech Life\n- Wide Guard\n- Protect"
+    },
+    {
+      "id": "b05e1473-902a-40ee-80cf-62ca1080daa8",
+      "species": "Cloyster",
+      "setText": "Cloyster @ Focus Sash\nAbility: Skill Link\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Icicle Spear\n- Rock Blast\n- Protect\n- Shell Smash"
+    },
+    {
+      "id": "0a4cc082-bf15-4877-9e61-f8b5a570267a",
+      "species": "Gardevoir",
+      "setText": "Gardevoir @ Choice Specs\nAbility: Trace\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Moonblast\n- Psyshock\n- Dazzling Gleam\n- Trick"
+    },
+    {
+      "id": "95ce212a-6076-43c6-b954-7607d5889026",
+      "species": "Flutter Mane",
+      "setText": "Flutter Mane @ Choice Specs\nAbility: Protosynthesis\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Moonblast\n- Shadow Ball\n- Dazzling Gleam\n- Trick"
+    },
+    {
+      "id": "84f8fe28-6564-4495-b500-09364a894764",
+      "species": "Rillaboom",
+      "setText": "Rillaboom @ Miracle Seed\nAbility: Grassy Surge\nEVs: 220 HP / 252 Atk / 36 Spe\nAdamant Nature\nLevel: 50\nTera Type: Fire\n- Fake Out\n- Grassy Glide\n- Wood Hammer\n- Protect"
+    },
+    {
+      "id": "0b967974-cfa5-4932-a58b-68c25f61935c",
+      "species": "Incineroar",
+      "setText": "Incineroar @ Safety Goggles\nAbility: Intimidate\nEVs: 252 HP / 76 Atk / 180 SpD\nCareful Nature\nLevel: 50\nTera Type: Grass\n- Fake Out\n- Parting Shot\n- Flare Blitz\n- Snarl"
+    },
+    {
+      "id": "16395710-b7cb-46df-9fde-064922be6c21",
+      "species": "Urshifu-Rapid-Strike",
+      "setText": "Urshifu-Rapid-Strike @ Focus Sash\nAbility: Unseen Fist\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Surging Strikes\n- Close Combat\n- Detect\n- Aqua Jet"
+    },
+    {
+      "id": "7e402417-6fcd-4609-adac-c4450d24df39",
+      "species": "Amoonguss",
+      "setText": "Amoonguss @ Sitrus Berry\nAbility: Regenerator\nEVs: 252 HP / 156 Def / 100 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Spore\n- Rage Powder\n- Clear Smog\n- Protect"
+    },
+    {
+      "id": "a39ce287-980c-4231-84ae-05e607084ef0",
+      "species": "Incineroar",
+      "setText": "Incineroar @ Sitrus Berry\nAbility: Intimidate\nEVs: 244 HP / 92 Atk / 172 SpD\nCareful Nature\nLevel: 50\nTera Type: Grass\n- Fake Out\n- Parting Shot\n- Flare Blitz\n- Knock Off"
+    },
+    {
+      "id": "cdc02c09-a6fc-4bc7-a4ea-cf9f4920f15d",
+      "species": "Rillaboom",
+      "setText": "Rillaboom @ Assault Vest\nAbility: Grassy Surge\nEVs: 236 HP / 252 Atk / 20 SpD\nAdamant Nature\nLevel: 50\nTera Type: Fire\n- Fake Out\n- Grassy Glide\n- Wood Hammer\n- U-turn"
+    },
+    {
+      "id": "28ca9f5a-a270-4de0-ae9f-9102b2685c09",
+      "species": "Urshifu-Rapid-Strike",
+      "setText": "Urshifu-Rapid-Strike @ Mystic Water\nAbility: Unseen Fist\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Surging Strikes\n- Close Combat\n- Aqua Jet\n- Protect"
+    },
+    {
+      "id": "1e1d214f-6a74-48d2-96a4-736158874554",
+      "species": "Raging Bolt",
+      "setText": "Raging Bolt @ Assault Vest\nAbility: Protosynthesis\nEVs: 236 HP / 4 Def / 252 SpA / 12 SpD / 4 Spe\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Thunderclap\n- Draco Meteor\n- Snarl\n- Volt Switch"
+    },
+    {
+      "id": "63cbadd8-4265-459b-9317-780fdff1b40d",
+      "species": "Amoonguss",
+      "setText": "Amoonguss @ Rocky Helmet\nAbility: Regenerator\nEVs: 236 HP / 156 Def / 116 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Spore\n- Rage Powder\n- Pollen Puff\n- Protect"
+    },
+    {
+      "id": "dda1105c-9acf-4d3b-b23b-7fc448a34f41",
+      "species": "Flutter Mane",
+      "setText": "Flutter Mane @ Focus Sash\nAbility: Protosynthesis\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Shadow Ball\n- Moonblast\n- Icy Wind\n- Protect"
+    },
+    {
+      "id": "30b34ec7-b402-4d76-b3e2-b75642749666",
+      "species": "Tornadus",
+      "setText": "Tornadus @ Covert Cloak\nAbility: Prankster\nEVs: 252 HP / 4 Def / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Tailwind\n- Taunt\n- Bleakwind Storm\n- Protect"
+    },
+    {
+      "id": "f9c47e54-9eff-4f68-93eb-234cf2c36f06",
+      "species": "Farigiraf",
+      "setText": "Farigiraf @ Sitrus Berry\nAbility: Armor Tail\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Trick Room\n- Helping Hand\n- Psychic\n- Protect"
+    },
+    {
+      "id": "e10907fc-535f-46e8-82f2-e0fc00659686",
+      "species": "Iron Hands",
+      "setText": "Iron Hands @ Assault Vest\nAbility: Quark Drive\nEVs: 196 HP / 116 Atk / 196 SpD\nAdamant Nature\nLevel: 50\nTera Type: Grass\n- Fake Out\n- Drain Punch\n- Wild Charge\n- Heavy Slam"
+    },
+    {
+      "id": "97781050-0795-4c52-a4f0-ad3b8ac33b7a",
+      "species": "Chi-Yu",
+      "setText": "Chi-Yu @ Life Orb\nAbility: Beads of Ruin\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Heat Wave\n- Dark Pulse\n- Snarl\n- Protect"
+    },
+    {
+      "id": "5bdfbdea-31cb-4642-860b-dca386755189",
+      "species": "Chien-Pao",
+      "setText": "Chien-Pao @ Focus Sash\nAbility: Sword of Ruin\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Ice Spinner\n- Sucker Punch\n- Sacred Sword\n- Protect"
+    },
+    {
+      "id": "9c01cb6e-2c60-497e-8c75-f4d04ebf56b2",
+      "species": "Whimsicott",
+      "setText": "Whimsicott @ Focus Sash\nAbility: Prankster\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Tailwind\n- Encore\n- Taunt\n- Moonblast"
+    },
+    {
+      "id": "0fbb5019-215a-4fec-a2c8-6aad4d70a435",
+      "species": "Smeargle",
+      "setText": "Smeargle @ Focus Sash\nAbility: Moody\nEVs: 252 HP / 4 Def / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Fake Out\n- Follow Me\n- Spore\n- Wide Guard"
+    },
+    {
+      "id": "60c214bd-9e9a-4a03-a95f-9f50fb316d8f",
+      "species": "Ursaluna-Bloodmoon",
+      "setText": "Ursaluna-Bloodmoon @ Life Orb\nAbility: Mind's Eye\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Normal\n- Blood Moon\n- Earth Power\n- Hyper Voice\n- Protect"
+    },
+    {
+      "id": "057ec37b-2d73-45c8-9560-e06cb74c376b",
+      "species": "Ogerpon-Wellspring",
+      "setText": "Ogerpon-Wellspring @ Wellspring Mask\nAbility: Water Absorb\nEVs: 252 Atk / 4 SpD / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Ivy Cudgel\n- Horn Leech\n- Follow Me\n- Spiky Shield"
+    },
+    {
+      "id": "e81422ee-90d4-4dd8-b5c2-9c3e1241d764",
+      "species": "Ogerpon-Hearthflame",
+      "setText": "Ogerpon-Hearthflame @ Hearthflame Mask\nAbility: Mold Breaker\nEVs: 252 Atk / 4 SpD / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Fire\n- Ivy Cudgel\n- Horn Leech\n- Swords Dance\n- Spiky Shield"
+    },
+    {
+      "id": "2dabbe82-04fe-42b1-8d5c-fe2239cfb44d",
+      "species": "Ogerpon-Cornerstone",
+      "setText": "Ogerpon-Cornerstone @ Cornerstone Mask\nAbility: Sturdy\nEVs: 252 Atk / 4 SpD / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Rock\n- Ivy Cudgel\n- Horn Leech\n- Follow Me\n- Spiky Shield"
+    },
+    {
+      "id": "ae77c24b-0e4e-4fc1-9c2d-4eb4463e1829",
+      "species": "Gholdengo",
+      "setText": "Gholdengo @ Leftovers\nAbility: Good as Gold\nEVs: 244 HP / 252 SpA / 12 Spe\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Make It Rain\n- Shadow Ball\n- Nasty Plot\n- Protect"
+    },
+    {
+      "id": "9d6dd049-f83a-4b06-9c5c-9c1e3eea2c8b",
+      "species": "Heatran",
+      "setText": "Heatran @ Leftovers\nAbility: Flash Fire\nEVs: 252 HP / 148 SpD / 108 Spe\nCalm Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Heat Wave\n- Earth Power\n- Substitute\n- Protect"
+    },
+    {
+      "id": "7a359fcc-6ace-4e50-9a7a-6508054032d0",
+      "species": "Landorus-Therian",
+      "setText": "Landorus-Therian @ Choice Scarf\nAbility: Intimidate\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Flying\n- Earthquake\n- Rock Slide\n- U-turn\n- Tera Blast"
+    },
+    {
+      "id": "9a585ba5-b1c7-4b5a-b6e2-7f16bbf199bc",
+      "species": "Garchomp",
+      "setText": "Garchomp @ Clear Amulet\nAbility: Rough Skin\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Steel\n- Earthquake\n- Dragon Claw\n- Rock Slide\n- Protect"
+    },
+    {
+      "id": "b085cd5c-59c4-445c-a6db-d0131e62fa45",
+      "species": "Dragonite",
+      "setText": "Dragonite @ Lum Berry\nAbility: Multiscale\nEVs: 252 HP / 76 Atk / 180 Spe\nAdamant Nature\nLevel: 50\nTera Type: Flying\n- Dragon Dance\n- Extreme Speed\n- Tera Blast\n- Protect"
+    },
+    {
+      "id": "193d2dda-ce10-4882-b432-62b8c8b744b8",
+      "species": "Baxcalibur",
+      "setText": "Baxcalibur @ Clear Amulet\nAbility: Thermal Exchange\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Glaive Rush\n- Icicle Crash\n- Ice Shard\n- Protect"
+    },
+    {
+      "id": "0eda2052-930b-48ea-bc12-651164e304cc",
+      "species": "Arcanine-Hisui",
+      "setText": "Arcanine-Hisui @ Safety Goggles\nAbility: Intimidate\nEVs: 252 HP / 140 Atk / 116 Spe\nAdamant Nature\nLevel: 50\nTera Type: Grass\n- Flare Blitz\n- Rock Slide\n- Extreme Speed\n- Protect"
+    },
+    {
+      "id": "3cc16c74-c1d3-4ff1-945a-d875c00a91d9",
+      "species": "Pelipper",
+      "setText": "Pelipper @ Focus Sash\nAbility: Drizzle\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Hurricane\n- Muddy Water\n- Tailwind\n- Wide Guard"
+    },
+    {
+      "id": "e0eae502-03b7-4826-8c9a-1936f564153f",
+      "species": "Archaludon",
+      "setText": "Archaludon @ Assault Vest\nAbility: Stamina\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Electro Shot\n- Draco Meteor\n- Flash Cannon\n- Body Press"
+    },
+    {
+      "id": "0a0996f6-864a-43b6-8310-0c77957013b4",
+      "species": "Dondozo",
+      "setText": "Dondozo @ Leftovers\nAbility: Unaware\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Dragon\n- Wave Crash\n- Order Up\n- Earthquake\n- Protect"
+    },
+    {
+      "id": "4c7b33ce-530f-4900-a61f-8a7391db49bc",
+      "species": "Tatsugiri",
+      "setText": "Tatsugiri @ Focus Sash\nAbility: Commander\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Draco Meteor\n- Muddy Water\n- Icy Wind\n- Protect"
+    },
+    {
+      "id": "46d5fb85-ad6e-4062-9caf-5f7f17302b9f",
+      "species": "Glimmora",
+      "setText": "Glimmora @ Focus Sash\nAbility: Toxic Debris\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Power Gem\n- Earth Power\n- Mortal Spin\n- Spiky Shield"
+    },
+    {
+      "id": "869bb22c-dd47-4967-a09e-3d3b84759c86",
+      "species": "Grimmsnarl",
+      "setText": "Grimmsnarl @ Light Clay\nAbility: Prankster\nEVs: 252 HP / 148 Def / 108 SpD\nCareful Nature\nLevel: 50\nTera Type: Ghost\n- Reflect\n- Light Screen\n- Parting Shot\n- Spirit Break"
+    },
+    {
+      "id": "0dc2c75c-d7c5-4a4e-86df-41a7305d3c4a",
+      "species": "Indeedee-F",
+      "setText": "Indeedee-F @ Psychic Seed\nAbility: Psychic Surge\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Follow Me\n- Helping Hand\n- Psychic\n- Protect"
+    },
+    {
+      "id": "1ebf582d-49cb-4351-882d-8f5815d912f4",
+      "species": "Hatterene",
+      "setText": "Hatterene @ Life Orb\nAbility: Magic Bounce\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Fairy\n- Trick Room\n- Dazzling Gleam\n- Expanding Force\n- Protect"
+    },
+    {
+      "id": "819ab8c7-9ef2-4f40-bd4a-1a49c650b2fb",
+      "species": "Cresselia",
+      "setText": "Cresselia @ Mental Herb\nAbility: Levitate\nEVs: 252 HP / 156 Def / 100 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Trick Room\n- Lunar Blessing\n- Ice Beam\n- Helping Hand"
+    },
+    {
+      "id": "2b632a34-5134-4ff0-8024-359c38a2b743",
+      "species": "Ting-Lu",
+      "setText": "Ting-Lu @ Assault Vest\nAbility: Vessel of Ruin\nEVs: 252 HP / 108 Atk / 148 SpD\nCareful Nature\nLevel: 50\nTera Type: Water\n- Ruination\n- Stomping Tantrum\n- Snarl\n- Heavy Slam"
+    },
+    {
+      "id": "9ec7a221-5ee5-47dc-a0d4-4150710ada0b",
+      "species": "Iron Bundle",
+      "setText": "Iron Bundle @ Booster Energy\nAbility: Quark Drive\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Freeze-Dry\n- Hydro Pump\n- Icy Wind\n- Protect"
+    },
+    {
+      "id": "0c5562d3-4600-4385-8a05-1ce3d8d52b22",
+      "species": "Iron Valiant",
+      "setText": "Iron Valiant @ Focus Sash\nAbility: Quark Drive\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Close Combat\n- Spirit Break\n- Wide Guard\n- Protect"
+    },
+    {
+      "id": "432d933a-14a0-451b-853f-6ed1524110ca",
+      "species": "Roaring Moon",
+      "setText": "Roaring Moon @ Booster Energy\nAbility: Protosynthesis\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Flying\n- Tailwind\n- Knock Off\n- Acrobatics\n- Protect"
+    },
+    {
+      "id": "f1ab01cf-9c2c-4b09-b123-792a77fcd2fd",
+      "species": "Kingambit",
+      "setText": "Kingambit @ Black Glasses\nAbility: Defiant\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Dark\n- Kowtow Cleave\n- Sucker Punch\n- Iron Head\n- Protect"
+    },
+    {
+      "id": "49e8a547-e865-4be1-868b-265bd32789c8",
+      "species": "Primarina",
+      "setText": "Primarina @ Throat Spray\nAbility: Liquid Voice\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Hyper Voice\n- Moonblast\n- Ice Beam\n- Protect"
+    },
+    {
+      "id": "f60472d2-c3ad-491d-ad32-b723414bc36c",
+      "species": "Sylveon",
+      "setText": "Sylveon @ Throat Spray\nAbility: Pixilate\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fire\n- Hyper Voice\n- Helping Hand\n- Tera Blast\n- Protect"
+    },
+    {
+      "id": "42d30fc0-39b1-4e39-be47-a9b7c79f6a61",
+      "species": "Gastrodon",
+      "setText": "Gastrodon @ Leftovers\nAbility: Storm Drain\nEVs: 252 HP / 132 Def / 124 SpD\nCalm Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Earth Power\n- Muddy Water\n- Recover\n- Protect"
+    },
+    {
+      "id": "6a782e02-eb58-4b26-bf22-446cefcef47a",
+      "species": "Rotom-Wash",
+      "setText": "Rotom-Wash @ Sitrus Berry\nAbility: Levitate\nEVs: 252 HP / 4 Def / 252 SpA\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Hydro Pump\n- Thunderbolt\n- Will-O-Wisp\n- Protect"
+    },
+    {
+      "id": "b819fe61-5f82-49df-9709-c54d477f1398",
+      "species": "Zapdos",
+      "setText": "Zapdos @ Safety Goggles\nAbility: Static\nEVs: 252 HP / 116 Def / 140 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Thunderbolt\n- Heat Wave\n- Tailwind\n- Protect"
+    },
+    {
+      "id": "f47b8f4e-37d1-4f26-87e3-70b561f167ec",
+      "species": "Metagross",
+      "setText": "Metagross @ Clear Amulet\nAbility: Clear Body\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Iron Head\n- Stomping Tantrum\n- Ice Punch\n- Protect"
+    },
+    {
+      "id": "af10fb05-3c59-4598-8bc0-1a59abd882df",
+      "species": "Volcarona",
+      "setText": "Volcarona @ Sitrus Berry\nAbility: Flame Body\nEVs: 244 HP / 252 SpA / 12 Spe\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Rage Powder\n- Heat Wave\n- Giga Drain\n- Protect"
+    },
+    {
+      "id": "8aece830-0dc8-4492-aaeb-73eea94b3699",
+      "species": "Garganacl",
+      "setText": "Garganacl @ Leftovers\nAbility: Purifying Salt\nEVs: 252 HP / 148 Def / 108 SpD\nCareful Nature\nLevel: 50\nTera Type: Water\n- Salt Cure\n- Recover\n- Wide Guard\n- Protect"
+    },
+    {
+      "id": "7be8f0b9-e235-434e-9100-0adcfb8e8911",
+      "species": "Gyarados",
+      "setText": "Gyarados @ Wacan Berry\nAbility: Intimidate\nEVs: 252 HP / 60 Atk / 196 Spe\nAdamant Nature\nLevel: 50\nTera Type: Flying\n- Waterfall\n- Thunder Wave\n- Taunt\n- Protect"
+    },
+    {
+      "id": "51f8b524-cd47-4fe7-b12b-09cd2569362c",
+      "species": "Hydreigon",
+      "setText": "Hydreigon @ Life Orb\nAbility: Levitate\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Draco Meteor\n- Dark Pulse\n- Tailwind\n- Protect"
+    },
+    {
+      "id": "3ada168d-ba7f-4815-8f14-42baa0f6d9f1",
+      "species": "Regidrago",
+      "setText": "Regidrago @ Dragon Fang\nAbility: Dragon's Maw\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Dragon\n- Dragon Energy\n- Draco Meteor\n- Earth Power\n- Protect"
+    },
+    {
+      "id": "0dcaf231-552a-4259-a151-717976122f60",
+      "species": "Sneasler",
+      "setText": "Sneasler @ Focus Sash\nAbility: Unburden\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Close Combat\n- Dire Claw\n- Fake Out\n- Protect"
+    },
+    {
+      "id": "c52b69e1-21cd-4270-98b3-9356c3117ba2",
+      "species": "Gardevoir",
+      "setText": "Gardevoir @ Choice Scarf\nAbility: Trace\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Moonblast\n- Psychic\n- Icy Wind\n- Trick"
+    },
+    {
+      "id": "65550c54-3869-4609-900b-6c8dce9a39d6",
+      "species": "Miraidon",
+      "setText": "Miraidon @ Choice Specs\nAbility: Hadron Engine\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Electric\n- Electro Drift\n- Draco Meteor\n- Volt Switch\n- Dazzling Gleam"
+    },
+    {
+      "id": "a86784b8-268a-4922-85e9-0e6d8372ee6c",
+      "species": "Koraidon",
+      "setText": "Koraidon @ Clear Amulet\nAbility: Orichalcum Pulse\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Fire\n- Collision Course\n- Flare Blitz\n- Dragon Claw\n- Protect"
+    },
+    {
+      "id": "cd4f3314-e7bc-4a3e-ab13-2f9efa2ecff5",
+      "species": "Calyrex-Ice",
+      "setText": "Calyrex-Ice @ Clear Amulet\nAbility: As One (Glastrier)\nEVs: 252 HP / 252 Atk / 4 SpD\nBrave Nature\nIVs: 0 Spe\nLevel: 50\nTera Type: Water\n- Glacial Lance\n- High Horsepower\n- Trick Room\n- Protect"
+    },
+    {
+      "id": "734faa85-edb1-4bbb-a0e0-9cc24efa8a3a",
+      "species": "Calyrex-Shadow",
+      "setText": "Calyrex-Shadow @ Focus Sash\nAbility: As One (Spectrier)\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Astral Barrage\n- Psyshock\n- Nasty Plot\n- Protect"
+    },
+    {
+      "id": "43286f7c-e606-4805-b34a-13573caec01a",
+      "species": "Lunala",
+      "setText": "Lunala @ Power Herb\nAbility: Shadow Shield\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Meteor Beam\n- Moongeist Beam\n- Wide Guard\n- Protect"
+    },
+    {
+      "id": "1d15bf00-23e0-4c6e-bf85-0cd8c682f17d",
+      "species": "Gholdengo",
+      "setText": "Gholdengo @ Choice Specs\nAbility: Good as Gold\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Make It Rain\n- Shadow Ball\n- Trick\n- Protect"
+    },
+    {
+      "id": "c8bdd61c-17b9-4749-8258-70b02791a7d7",
+      "species": "Gholdengo",
+      "setText": "Gholdengo @ Leftovers\nAbility: Good as Gold\nEVs: 244 HP / 252 SpA / 12 Spe\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Make It Rain\n- Shadow Ball\n- Substitute\n- Protect"
+    },
+    {
+      "id": "b1de856f-2719-4460-a971-68856d7e6c7d",
+      "species": "Garchomp",
+      "setText": "Garchomp @ Yache Berry\nAbility: Rough Skin\nEVs: 252 Atk / 4 SpD / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Steel\n- Earthquake\n- Dragon Claw\n- Rock Slide\n- Protect"
+    },
+    {
+      "id": "c1081e94-f731-4a64-a182-2d047b1e9fba",
+      "species": "Garchomp",
+      "setText": "Garchomp @ Choice Scarf\nAbility: Rough Skin\nEVs: 252 Atk / 4 SpD / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ground\n- Earthquake\n- Stomping Tantrum\n- Rock Slide\n- Poison Jab"
+    },
+    {
+      "id": "9c3d7557-9211-40b0-90a2-1edda0f8fc34",
+      "species": "Landorus-Therian",
+      "setText": "Landorus-Therian @ Clear Amulet\nAbility: Intimidate\nEVs: 252 Atk / 4 Def / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Flying\n- Stomping Tantrum\n- Rock Slide\n- Tera Blast\n- Protect"
+    },
+    {
+      "id": "d1ce28df-8be4-4f92-84b5-9956a8352448",
+      "species": "Landorus-Therian",
+      "setText": "Landorus-Therian @ Assault Vest\nAbility: Intimidate\nEVs: 196 HP / 116 Atk / 196 SpD\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Stomping Tantrum\n- Rock Slide\n- U-turn\n- Knock Off"
+    },
+    {
+      "id": "41ac588c-a518-494a-96f0-75e0b3298f84",
+      "species": "Thundurus",
+      "setText": "Thundurus @ Covert Cloak\nAbility: Prankster\nEVs: 252 HP / 4 Def / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Thunder Wave\n- Taunt\n- Eerie Impulse\n- Wildbolt Storm"
+    },
+    {
+      "id": "befed702-8b3b-4f53-a271-4e96b3952c69",
+      "species": "Thundurus-Therian",
+      "setText": "Thundurus-Therian @ Life Orb\nAbility: Volt Absorb\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Electric\n- Thunderbolt\n- Tera Blast\n- Sludge Bomb\n- Protect"
+    },
+    {
+      "id": "67342462-550a-412c-9021-6f0d25d492c9",
+      "species": "Zapdos",
+      "setText": "Zapdos @ Leftovers\nAbility: Static\nEVs: 252 HP / 92 Def / 164 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Thunderbolt\n- Hurricane\n- Roost\n- Protect"
+    },
+    {
+      "id": "8fa09699-dc38-4622-9e94-049b7eefd834",
+      "species": "Raichu",
+      "setText": "Raichu @ Focus Sash\nAbility: Lightning Rod\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nLevel: 50\nTera Type: Ghost\n- Fake Out\n- Nuzzle\n- Encore\n- Volt Switch"
+    },
+    {
+      "id": "ebf3c366-6d71-4a35-a377-7c180d31140c",
+      "species": "Pachirisu",
+      "setText": "Pachirisu @ Sitrus Berry\nAbility: Volt Absorb\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Follow Me\n- Nuzzle\n- Super Fang\n- Protect"
+    },
+    {
+      "id": "469e8134-89ab-440b-9787-0d8b320bc3cb",
+      "species": "Gyarados",
+      "setText": "Gyarados @ Assault Vest\nAbility: Intimidate\nEVs: 252 HP / 156 Atk / 100 Spe\nAdamant Nature\nLevel: 50\nTera Type: Flying\n- Waterfall\n- Tera Blast\n- Ice Fang\n- Thunder Wave"
+    },
+    {
+      "id": "0271f188-3cf5-4ae5-8bec-172aa32762bd",
+      "species": "Milotic",
+      "setText": "Milotic @ Sitrus Berry\nAbility: Competitive\nEVs: 252 HP / 148 Def / 108 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Muddy Water\n- Ice Beam\n- Hypnosis\n- Protect"
+    },
+    {
+      "id": "7d307c0f-f486-4f73-9c7a-c2bd5019c464",
+      "species": "Suicune",
+      "setText": "Suicune @ Leftovers\nAbility: Pressure\nEVs: 252 HP / 116 Def / 140 SpD\nCalm Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Tailwind\n- Snarl\n- Scald\n- Protect"
+    },
+    {
+      "id": "a348c157-d660-4237-b2e6-5cd238ec0ca4",
+      "species": "Palafin-Hero",
+      "setText": "Palafin-Hero @ Mystic Water\nAbility: Zero to Hero\nEVs: 252 Atk / 4 SpD / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Water\n- Jet Punch\n- Wave Crash\n- Haze\n- Protect"
+    },
+    {
+      "id": "ddaf5653-d584-4c3a-b90c-f894f7c35d20",
+      "species": "Palafin-Hero",
+      "setText": "Palafin-Hero @ Assault Vest\nAbility: Zero to Hero\nEVs: 236 HP / 252 Atk / 20 Spe\nAdamant Nature\nLevel: 50\nTera Type: Grass\n- Jet Punch\n- Wave Crash\n- Ice Punch\n- Drain Punch"
+    },
+    {
+      "id": "c23afcaa-ec15-450b-a23b-12f4b21bd2e6",
+      "species": "Rotom-Heat",
+      "setText": "Rotom-Heat @ Sitrus Berry\nAbility: Levitate\nEVs: 252 HP / 4 Def / 252 SpA\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Overheat\n- Thunderbolt\n- Will-O-Wisp\n- Protect"
+    },
+    {
+      "id": "8297ce88-ba06-44b6-9928-7f0bdc2b703a",
+      "species": "Rotom-Mow",
+      "setText": "Rotom-Mow @ Choice Scarf\nAbility: Levitate\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Leaf Storm\n- Thunderbolt\n- Trick\n- Volt Switch"
+    },
+    {
+      "id": "ff436b21-3b44-471d-af0d-ea60f676870e",
+      "species": "Arcanine",
+      "setText": "Arcanine @ Sitrus Berry\nAbility: Intimidate\nEVs: 252 HP / 92 Def / 164 SpD\nCareful Nature\nLevel: 50\nTera Type: Grass\n- Snarl\n- Will-O-Wisp\n- Flare Blitz\n- Protect"
+    },
+    {
+      "id": "34545fc0-970b-45d0-b1ec-29e833eeb76c",
+      "species": "Ninetales",
+      "setText": "Ninetales @ Covert Cloak\nAbility: Drought\nEVs: 252 HP / 4 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Encore\n- Will-O-Wisp\n- Heat Wave\n- Protect"
+    },
+    {
+      "id": "aceefb67-ed3a-4727-9a26-ecd6f6cf0119",
+      "species": "Torkoal",
+      "setText": "Torkoal @ Assault Vest\nAbility: Drought\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Grass\n- Eruption\n- Heat Wave\n- Solar Beam\n- Earth Power"
+    },
+    {
+      "id": "536b96d5-d95a-42f1-8fbb-adf59d47c1c8",
+      "species": "Charizard",
+      "setText": "Charizard @ Life Orb\nAbility: Solar Power\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fire\n- Heat Wave\n- Air Slash\n- Solar Beam\n- Protect"
+    },
+    {
+      "id": "9b73a633-fc30-477a-9fc8-5eed05272a66",
+      "species": "Venusaur",
+      "setText": "Venusaur @ Wide Lens\nAbility: Chlorophyll\nEVs: 252 HP / 4 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Sleep Powder\n- Frenzy Plant\n- Sludge Bomb\n- Protect"
+    },
+    {
+      "id": "6800a177-a319-4b30-a322-4bf104444672",
+      "species": "Lilligant",
+      "setText": "Lilligant @ Focus Sash\nAbility: Chlorophyll\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- After You\n- Sleep Powder\n- Leaf Storm\n- Protect"
+    },
+    {
+      "id": "f3c9d33e-3e53-4a4a-8e96-7446eecf4d27",
+      "species": "Entei",
+      "setText": "Entei @ Assault Vest\nAbility: Inner Focus\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Grass\n- Sacred Fire\n- Extreme Speed\n- Stomping Tantrum\n- Snarl"
+    },
+    {
+      "id": "5cf8e9b3-b008-41d9-8fdc-b52a8271fbe4",
+      "species": "Gouging Fire",
+      "setText": "Gouging Fire @ Leftovers\nAbility: Protosynthesis\nEVs: 252 HP / 156 Def / 100 SpD\nImpish Nature\nLevel: 50\nTera Type: Fairy\n- Heat Crash\n- Breaking Swipe\n- Burning Bulwark\n- Howl"
+    },
+    {
+      "id": "5f023dd1-3e1c-4dc4-9123-f50717e269d1",
+      "species": "Walking Wake",
+      "setText": "Walking Wake @ Choice Specs\nAbility: Protosynthesis\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Hydro Steam\n- Draco Meteor\n- Flamethrower\n- Protect"
+    },
+    {
+      "id": "02040886-998e-4172-89b1-4b7b61465ea7",
+      "species": "Raging Bolt",
+      "setText": "Raging Bolt @ Leftovers\nAbility: Protosynthesis\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Thunderclap\n- Draco Meteor\n- Calm Mind\n- Protect"
+    },
+    {
+      "id": "0aefc8b0-f145-454c-9541-46e24266fc77",
+      "species": "Amoonguss",
+      "setText": "Amoonguss @ Mental Herb\nAbility: Regenerator\nEVs: 252 HP / 156 Def / 100 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Dark\n- Spore\n- Rage Powder\n- Pollen Puff\n- Protect"
+    },
+    {
+      "id": "e3b46e62-63d2-45c8-8a74-fe7691b4399f",
+      "species": "Amoonguss",
+      "setText": "Amoonguss @ Safety Goggles\nAbility: Regenerator\nEVs: 236 HP / 156 Def / 116 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Spore\n- Rage Powder\n- Clear Smog\n- Protect"
+    },
+    {
+      "id": "5c6e7a05-14fc-4418-9932-77121d5750d2",
+      "species": "Aromatisse",
+      "setText": "Aromatisse @ Sitrus Berry\nAbility: Aroma Veil\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Steel\n- Trick Room\n- Helping Hand\n- Moonblast\n- Protect"
+    },
+    {
+      "id": "baa9ff19-ebd0-447f-9efe-6ca2c695e0f1",
+      "species": "Dusclops",
+      "setText": "Dusclops @ Eviolite\nAbility: Frisk\nEVs: 252 HP / 196 Def / 60 SpD\nSassy Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Dark\n- Trick Room\n- Will-O-Wisp\n- Night Shade\n- Pain Split"
+    },
+    {
+      "id": "85f1bbda-0fde-492a-b29d-10121ec0add5",
+      "species": "Porygon2",
+      "setText": "Porygon2 @ Eviolite\nAbility: Trace\nEVs: 244 HP / 92 Def / 172 SpD\nSassy Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Fairy\n- Trick Room\n- Recover\n- Ice Beam\n- Foul Play"
+    },
+    {
+      "id": "b7344f8a-e0fe-408d-b9d9-185fe9f32473",
+      "species": "Cresselia",
+      "setText": "Cresselia @ Sitrus Berry\nAbility: Levitate\nEVs: 252 HP / 196 Def / 60 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Dark\n- Trick Room\n- Ice Beam\n- Helping Hand\n- Protect"
+    },
+    {
+      "id": "994b29c3-dd75-460b-b9af-5d71754e1887",
+      "species": "Indeedee-M",
+      "setText": "Indeedee-M @ Psychic Seed\nAbility: Psychic Surge\nEVs: 252 HP / 4 Def / 252 SpA\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Expanding Force\n- Helping Hand\n- Protect\n- Trick Room"
+    },
+    {
+      "id": "9fb28dbf-0710-40ad-92a7-2f3683ac5213",
+      "species": "Hatterene",
+      "setText": "Hatterene @ Babiri Berry\nAbility: Magic Bounce\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Fire\n- Trick Room\n- Dazzling Gleam\n- Mystical Fire\n- Protect"
+    },
+    {
+      "id": "e32d3be6-ede3-4b8a-bd7c-b466acfdeeb0",
+      "species": "Torkoal",
+      "setText": "Torkoal @ Charcoal\nAbility: Drought\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Fire\n- Eruption\n- Heat Wave\n- Earth Power\n- Protect"
+    },
+    {
+      "id": "5c4ac9c4-e210-4bb2-a037-79bcb9912cd3",
+      "species": "Hariyama",
+      "setText": "Hariyama @ Flame Orb\nAbility: Guts\nEVs: 252 HP / 252 Atk / 4 SpD\nBrave Nature\nIVs: 0 Spe\nLevel: 50\nTera Type: Grass\n- Fake Out\n- Close Combat\n- Knock Off\n- Wide Guard"
+    },
+    {
+      "id": "81515934-0505-4281-ae99-c5496a485916",
+      "species": "Iron Hands",
+      "setText": "Iron Hands @ Sitrus Berry\nAbility: Quark Drive\nEVs: 252 HP / 76 Atk / 180 SpD\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Fake Out\n- Drain Punch\n- Wild Charge\n- Protect"
+    },
+    {
+      "id": "ff1760fb-eeb8-4b33-a384-9113a95c47e5",
+      "species": "Kommo-o",
+      "setText": "Kommo-o @ Leftovers\nAbility: Bulletproof\nEVs: 252 HP / 252 SpA / 4 SpD\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Clanging Scales\n- Flamethrower\n- Aura Sphere\n- Protect"
+    },
+    {
+      "id": "b78444a9-b7df-4197-ad3e-7727a9c1644d",
+      "species": "Goodra-Hisui",
+      "setText": "Goodra-Hisui @ Assault Vest\nAbility: Sap Sipper\nEVs: 252 HP / 4 Def / 252 SpA\nModest Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Draco Meteor\n- Flash Cannon\n- Thunderbolt\n- Acid Spray"
+    },
+    {
+      "id": "de442346-2769-4203-b67e-9cbbbca6563c",
+      "species": "Sneasler",
+      "setText": "Sneasler @ Psychic Seed\nAbility: Unburden\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Fake Out\n- Dire Claw\n- Close Combat\n- Protect"
+    },
+    {
+      "id": "14771a8d-2af9-423e-9f34-7a608e3eb13f",
+      "species": "Weavile",
+      "setText": "Weavile @ Focus Sash\nAbility: Pressure\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Ghost\n- Fake Out\n- Ice Spinner\n- Knock Off\n- Protect"
+    },
+    {
+      "id": "9f54c95d-3ad6-4cba-b9d9-074d077d1341",
+      "species": "Chandelure",
+      "setText": "Chandelure @ Focus Sash\nAbility: Flash Fire\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Heat Wave\n- Shadow Ball\n- Trick Room\n- Protect"
+    },
+    {
+      "id": "4512ce4a-9437-48d6-b736-b799bf7071f5",
+      "species": "Hydreigon",
+      "setText": "Hydreigon @ Choice Specs\nAbility: Levitate\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Draco Meteor\n- Dark Pulse\n- Flash Cannon\n- Protect"
+    },
+    {
+      "id": "7ffd3c03-75ff-44f6-9246-6a5be2589a5c",
+      "species": "Volcarona",
+      "setText": "Volcarona @ Rocky Helmet\nAbility: Flame Body\nEVs: 252 HP / 180 Def / 76 SpD\nBold Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Water\n- Rage Powder\n- Heat Wave\n- Struggle Bug\n- Protect"
+    },
+    {
+      "id": "69af6fa6-0c76-4ea6-ac12-e507a7a0b8d0",
+      "species": "Garganacl",
+      "setText": "Garganacl @ Sitrus Berry\nAbility: Purifying Salt\nEVs: 252 HP / 148 Def / 108 SpD\nCareful Nature\nLevel: 50\nTera Type: Water\n- Salt Cure\n- Wide Guard\n- Recover\n- Protect"
+    },
+    {
+      "id": "420d98dc-b30f-4d34-aaf8-e3ff7f504319",
+      "species": "Corviknight",
+      "setText": "Corviknight @ Leftovers\nAbility: Mirror Armor\nEVs: 252 HP / 156 Def / 100 SpD\nImpish Nature\nLevel: 50\nTera Type: Water\n- Tailwind\n- Iron Head\n- Body Press\n- Roost"
+    },
+    {
+      "id": "d0d4b74e-3b4e-45fe-be32-d4de36961ce2",
+      "species": "Skarmory",
+      "setText": "Skarmory @ Rocky Helmet\nAbility: Sturdy\nEVs: 252 HP / 196 Def / 60 SpD\nImpish Nature\nLevel: 50\nTera Type: Water\n- Tailwind\n- Iron Defense\n- Body Press\n- Roost"
+    },
+    {
+      "id": "084bac6e-d2f9-4c9e-9b0b-72f519fe1b72",
+      "species": "Glimmora",
+      "setText": "Glimmora @ Power Herb\nAbility: Toxic Debris\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Meteor Beam\n- Power Gem\n- Earth Power\n- Protect"
+    },
+    {
+      "id": "7b659591-d022-443a-9079-e16c50487d18",
+      "species": "Nihilego",
+      "setText": "Nihilego @ Power Herb\nAbility: Beast Boost\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Meteor Beam\n- Sludge Bomb\n- Thunderbolt\n- Protect"
+    },
+    {
+      "id": "4be85b76-dc89-4147-a08b-f2c883f3f822",
+      "species": "Kartana",
+      "setText": "Kartana @ Focus Sash\nAbility: Beast Boost\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Fire\n- Leaf Blade\n- Sacred Sword\n- Protect\n- Detect"
+    },
+    {
+      "id": "bb9178a8-565b-49de-9800-72c927234b93",
+      "species": "Celesteela",
+      "setText": "Celesteela @ Leftovers\nAbility: Beast Boost\nEVs: 252 HP / 76 Def / 180 SpD\nSassy Nature\nIVs: 0 Spe\nLevel: 50\nTera Type: Water\n- Heavy Slam\n- Leech Seed\n- Protect\n- Flamethrower"
+    },
+    {
+      "id": "e508b32f-5250-40f1-aafb-d380dd8bd373",
+      "species": "Tapu Fini",
+      "setText": "Tapu Fini @ Leftovers\nAbility: Misty Surge\nEVs: 252 HP / 92 Def / 164 SpD\nCalm Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Muddy Water\n- Moonblast\n- Calm Mind\n- Protect"
+    },
+    {
+      "id": "b753fbf4-a15a-4ac0-9c34-aba746fe4990",
+      "species": "Tapu Koko",
+      "setText": "Tapu Koko @ Life Orb\nAbility: Electric Surge\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Thunderbolt\n- Dazzling Gleam\n- Volt Switch\n- Protect"
+    },
+    {
+      "id": "8cb1611a-4439-4e34-845b-c40eb7e12db3",
+      "species": "Tapu Lele",
+      "setText": "Tapu Lele @ Choice Specs\nAbility: Psychic Surge\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Fairy\n- Psychic\n- Moonblast\n- Focus Blast\n- Trick"
+    },
+    {
+      "id": "c2bd2c75-3e91-4ec0-bfa1-4b3c17829ce5",
+      "species": "Tapu Bulu",
+      "setText": "Tapu Bulu @ Assault Vest\nAbility: Grassy Surge\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Fire\n- Wood Hammer\n- Horn Leech\n- Close Combat\n- Protect"
+    },
+    {
+      "id": "53687a0f-36bc-49fd-85b6-cc84f43d2b77",
+      "species": "Metagross",
+      "setText": "Metagross @ Weakness Policy\nAbility: Clear Body\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Water\n- Iron Head\n- Stomping Tantrum\n- Ice Punch\n- Protect"
+    },
+    {
+      "id": "beb5e197-dd13-4e2d-821c-c4345f6712a2",
+      "species": "Scizor",
+      "setText": "Scizor @ Sitrus Berry\nAbility: Technician\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Fire\n- Bullet Punch\n- Close Combat\n- Protect\n- Swords Dance"
+    },
+    {
+      "id": "a9dc74d9-ab8a-47b9-8ec1-cc282a22f143",
+      "species": "Aegislash",
+      "setText": "Aegislash @ Weakness Policy\nAbility: Stance Change\nEVs: 252 HP / 252 SpA / 4 SpD\nQuiet Nature\nIVs: 0 Atk / 0 Spe\nLevel: 50\nTera Type: Water\n- King's Shield\n- Shadow Ball\n- Flash Cannon\n- Wide Guard"
+    },
+    {
+      "id": "da68658f-aaa2-4d8a-82ee-458096d73fe7",
+      "species": "Chandelure",
+      "setText": "Chandelure @ Choice Scarf\nAbility: Flash Fire\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Ghost\n- Heat Wave\n- Shadow Ball\n- Trick\n- Energy Ball"
+    },
+    {
+      "id": "d549f0b4-8f7a-4fdf-9ad6-3e936dcc39a7",
+      "species": "Tyranitar",
+      "setText": "Tyranitar @ Smooth Rock\nAbility: Sand Stream\nEVs: 252 HP / 252 Atk / 4 SpD\nAdamant Nature\nLevel: 50\nTera Type: Flying\n- Rock Slide\n- Knock Off\n- Tera Blast\n- Protect"
+    },
+    {
+      "id": "67aea3df-fa02-46f6-a41f-aefd7663402a",
+      "species": "Excadrill",
+      "setText": "Excadrill @ Focus Sash\nAbility: Sand Rush\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Steel\n- Iron Head\n- High Horsepower\n- Rock Slide\n- Protect"
+    },
+    {
+      "id": "126f0f90-dd96-4890-93e0-89e31b3b2963",
+      "species": "Lycanroc-Dusk",
+      "setText": "Lycanroc-Dusk @ Focus Sash\nAbility: Tough Claws\nEVs: 4 HP / 252 Atk / 252 Spe\nJolly Nature\nLevel: 50\nTera Type: Rock\n- Accelerock\n- Rock Slide\n- Close Combat\n- Protect"
+    },
+    {
+      "id": "4f9f1052-ed5a-4c0c-8afd-ca2466bf5ccd",
+      "species": "Gastrodon",
+      "setText": "Gastrodon @ Rindo Berry\nAbility: Storm Drain\nEVs: 252 HP / 132 Def / 124 SpD\nCalm Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Earth Power\n- Muddy Water\n- Recover\n- Protect"
+    },
+    {
+      "id": "ab0a17c9-6ee7-4ae1-a1cb-bfa2538dc8a9",
+      "species": "Sandy Shocks",
+      "setText": "Sandy Shocks @ Booster Energy\nAbility: Protosynthesis\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Grass\n- Thunderbolt\n- Earth Power\n- Volt Switch\n- Protect"
+    },
+    {
+      "id": "c4001ef8-3050-473b-a8f4-7ba993fbd59f",
+      "species": "Iron Crown",
+      "setText": "Iron Crown @ Life Orb\nAbility: Quark Drive\nEVs: 4 HP / 252 SpA / 252 Spe\nTimid Nature\nIVs: 0 Atk\nLevel: 50\nTera Type: Steel\n- Tachyon Cutter\n- Psychic\n- Focus Blast\n- Protect"
+    }
+  ]
 }

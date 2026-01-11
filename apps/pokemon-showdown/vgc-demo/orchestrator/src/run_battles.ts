@@ -8,6 +8,7 @@ import { collectReplayMeta } from './meta';
 import { isoNow, sha256Hex, hashToUnitInterval, type JsonRow } from './shared';
 import { generatePackedTeam, loadTeamGenData, select4FromTeam } from './team/teamgen';
 import { runOneBattle, type TraceDecisionEvent } from './showdown/sim_runner';
+import { select4Local } from './ai/selector';
 import * as TeamsMod from '../../../../../tools/pokemon-showdown/pokemon-showdown/sim/teams';
 
 const Teams: any = (TeamsMod as any).default?.Teams ?? (TeamsMod as any).Teams ?? (TeamsMod as any).default;
@@ -138,6 +139,11 @@ export async function runBattlesChunk(opts: {
       let select4_p1 = [0, 1, 2, 3];
       let select4_p2 = [0, 1, 2, 3];
 
+      // Local selector fallback (deterministic) when python is not available.
+      // Note: this returns both the 4-of-6 indices and a preferred ordering (leads first).
+      let ordered4_p1: number[] | null = null;
+      let ordered4_p2: number[] | null = null;
+
       if (opts.pythonUrl) {
         try {
           phase = 'select4:p1';
@@ -166,14 +172,40 @@ export async function runBattlesChunk(opts: {
         } catch {}
       }
 
-      const team4_p1 = select4FromTeam(team6_p1, select4_p1);
-      const team4_p2 = select4FromTeam(team6_p2, select4_p2);
+      if (!opts.pythonUrl) {
+        const sel1 = select4Local(team6_packed_p1);
+        const sel2 = select4Local(team6_packed_p2);
+        select4_p1 = sel1.select4 as any;
+        select4_p2 = sel2.select4 as any;
+        ordered4_p1 = sel1.ordered4;
+        ordered4_p2 = sel2.ordered4;
+      }
+
+      const team4_p1_raw = select4FromTeam(team6_p1, select4_p1);
+      const team4_p2_raw = select4FromTeam(team6_p2, select4_p2);
+
+      // If local selector provided a preferred ordering, apply it by reordering the 4-set list.
+      // This makes team preview deterministic with a simple `team 1234` choice.
+      const applyOrder = (team4: any[], ordered4: number[] | null, select4: number[]) => {
+        if (!ordered4 || ordered4.length !== 4) return team4;
+        const idxToPos = new Map<number, number>();
+        for (let i = 0; i < select4.length; i++) idxToPos.set(select4[i], i);
+        const orderedPos = ordered4.map((idx6) => idxToPos.get(idx6)).filter((p) => typeof p === 'number') as number[];
+        if (orderedPos.length !== 4) return team4;
+        const out: any[] = [];
+        for (const pos of orderedPos) out.push(team4[pos]);
+        return out;
+      };
+
+      const team4_p1 = applyOrder(team4_p1_raw, ordered4_p1, select4_p1);
+      const team4_p2 = applyOrder(team4_p2_raw, ordered4_p2, select4_p2);
 
       const packed1 = Teams.pack(team4_p1);
       const packed2 = Teams.pack(team4_p2);
 
-      const policyMode1 = opts.pythonUrl && opts.p1Policy !== 'fallback' ? 'python' : 'fallback';
-      const policyMode2 = opts.pythonUrl && opts.p2Policy !== 'fallback' ? 'python' : 'fallback';
+      const isLocal = (p: string) => p === 'battle_policy' || p.startsWith('local:');
+      const policyMode1 = isLocal(opts.p1Policy) ? 'local' : opts.pythonUrl && opts.p1Policy !== 'fallback' ? 'python' : 'fallback';
+      const policyMode2 = isLocal(opts.p2Policy) ? 'local' : opts.pythonUrl && opts.p2Policy !== 'fallback' ? 'python' : 'fallback';
 
       phase = 'battle';
       const result = await runOneBattle({

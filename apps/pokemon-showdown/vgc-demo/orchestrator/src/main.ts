@@ -8,7 +8,7 @@ import { extractRequestFeatures } from './learn/obs_features';
 import { readSaveConfig } from './learn/save_config';
 import { collectReplayMeta } from './meta';
 import { listVgcFormatCandidates, resolveFormatIdOrSuggest } from './showdown/format_resolver';
-import { generatePackedTeam, loadTeamGenData, select4FromTeam } from './team/teamgen';
+import { generatePackedTeam, loadTeamGenData, select4FromTeam, tryGeneratePackedTeamFromPool } from './team/teamgen';
 import { runOneBattle, type TraceDecisionEvent } from './showdown/sim_runner';
 import * as TeamsMod from '../../../../../tools/pokemon-showdown/pokemon-showdown/sim/teams';
 
@@ -79,6 +79,38 @@ function hashToUnitInterval(s: string): number {
   const h = sha256Hex(s).slice(0, 8);
   const n = parseInt(h, 16) >>> 0;
   return n / 0x1_0000_0000;
+}
+
+function lcg(seed: number): () => number {
+  let state = (seed >>> 0) || 1;
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+}
+
+function sampleUniqueIndices(n: number, k: number, rng: () => number): number[] {
+  const out: number[] = [];
+  const used = new Set<number>();
+  let guard = 0;
+  while (out.length < k && guard++ < 10000) {
+    const idx = Math.floor(rng() * n);
+    if (idx < 0 || idx >= n) continue;
+    if (used.has(idx)) continue;
+    used.add(idx);
+    out.push(idx);
+  }
+  if (out.length !== k) throw new Error(`Failed to sample ${k} unique indices from 0..${n - 1}`);
+  return out;
+}
+
+function shuffleInPlace<T>(arr: T[], rng: () => number) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
 }
 
 type BattleRow = Record<string, unknown>;
@@ -175,19 +207,26 @@ async function main() {
   }
 
   const root = repoRoot();
-  const outDir = join(root, 'data/pokemon-showdown/vgc-demo');
+  const vgcDataRoot = join(root, 'data/pokemon-showdown/vgc-demo');
+  mkdirSync(vgcDataRoot, { recursive: true });
+
+  const runId = makeRunId();
+  // Write demo outputs in a per-run train_* directory so Replay Studio indexes them.
+  const outDir = join(vgcDataRoot, `train_${runId}`);
   mkdirSync(outDir, { recursive: true });
 
   const saveCfg0 = readSaveConfig(outDir);
   const outDirResolved = resolve(outDir);
   let saveDir = resolve(saveCfg0.saveDir);
   if (!saveDir.toLowerCase().startsWith(outDirResolved.toLowerCase())) {
-    console.warn(`[vgc-demo] VGC_SAVE_DIR must be under data/pokemon-showdown/vgc-demo/: ${saveCfg0.saveDir} (using default)`);
+    console.warn(`[vgc-demo] VGC_SAVE_DIR must be under ${outDir}: ${saveCfg0.saveDir} (using default)`);
     saveDir = outDirResolved;
   }
   const saveCfg = { ...saveCfg0, saveDir };
-
-  const runId = makeRunId();
+  // For demo runs, default to saving replays (unless user explicitly set VGC_SAVE_REPLAY).
+  if (!Object.prototype.hasOwnProperty.call(process.env, 'VGC_SAVE_REPLAY')) {
+    saveCfg.saveReplay = true;
+  }
 
   const battlesPath = join(outDir, 'battles.jsonl');
   const summaryPath = join(outDir, 'summary.json');
@@ -210,6 +249,26 @@ async function main() {
   const appendSave = saveCfg.compress ? appendJsonlGz : appendJsonl;
 
   const data = loadTeamGenData();
+
+  let warnedPoolFallback = false;
+
+  // Team cycling: run N battles with the same team6, then resample.
+  // Default to 10 so a 21-battle demo produces 10 + 10 + 1 battles across 3 teams.
+  const battlesPerBatch = Math.max(1, Math.min(500, Number(process.env.VGC_BATTLES_PER_BATCH ?? '10') || 10));
+  let curBatch = -1;
+  let team6_p1: any[] = [];
+  let team6_p2: any[] = [];
+  let team6_packed_p1 = '';
+  let team6_packed_p2 = '';
+  let team1Hash = '';
+  let team2Hash = '';
+  let team1Id = '';
+  let team2Id = '';
+
+  // Updated per battle (inside the try block), but also needed in the catch path
+  // so we can audit batch team rotation even when battles error/timeout.
+  let select4_p1: number[] = [];
+  let select4_p2: number[] = [];
 
   if (saveCfg.saveTrainLog || saveCfg.saveReplay) {
     console.log(
@@ -239,59 +298,55 @@ async function main() {
 
     try {
       phase = 'teamgen';
-      const t1 = generatePackedTeam(data, battleSeed * 1009 + 1);
-      const t2 = generatePackedTeam(data, battleSeed * 1009 + 2);
+      const batch = Math.floor(i / battlesPerBatch);
+      if (batch !== curBatch) {
+        curBatch = batch;
+        const batchSeed = seed + 100_000 * (batch + 1);
 
-      // Team preview (demo): call /select4 if python URL is provided; else take first 4.
-      const team6_p1 = t1.team;
-      const team6_p2 = t2.team;
-      const team6_packed_p1 = t1.packed;
-      const team6_packed_p2 = t2.packed;
-
-      const team1Hash = sha256Hex(team6_packed_p1);
-      const team2Hash = sha256Hex(team6_packed_p2);
-      const team1Id = team1Hash.slice(0, 12);
-      const team2Id = team2Hash.slice(0, 12);
-
-      let select4_p1 = [0, 1, 2, 3];
-      let select4_p2 = [0, 1, 2, 3];
-
-      if (pythonUrl) {
-        try {
-          phase = 'select4:p1';
-          const res1 = await fetch(`${pythonUrl}/select4`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ team6: team6_packed_p1, format: resolved.id, turn: 0, policy: p1Policy }),
-          });
-          if (res1.ok) {
-            const j = await res1.json();
-            if (Array.isArray(j?.select4) && j.select4.length === 4) select4_p1 = j.select4;
+        const pool1 = tryGeneratePackedTeamFromPool(batchSeed * 1009 + 1, { mode: 'random' });
+        const pool2 = tryGeneratePackedTeamFromPool(batchSeed * 1009 + 2, { mode: 'random' });
+        if (!pool1 || !pool2) {
+          if (!warnedPoolFallback) {
+            warnedPoolFallback = true;
+            console.warn('[vgc-demo] pool.json not usable (need >= 6 valid entries); falling back to data/species_pool.json + data/sets_min.json');
           }
-        } catch {}
+        }
+        const t1 = pool1 ?? generatePackedTeam(data, batchSeed * 1009 + 1);
+        const t2 = pool2 ?? generatePackedTeam(data, batchSeed * 1009 + 2);
 
-        try {
-          phase = 'select4:p2';
-          const res2 = await fetch(`${pythonUrl}/select4`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ team6: team6_packed_p2, format: resolved.id, turn: 0, policy: p2Policy }),
-          });
-          if (res2.ok) {
-            const j = await res2.json();
-            if (Array.isArray(j?.select4) && j.select4.length === 4) select4_p2 = j.select4;
-          }
-        } catch {}
+        team6_p1 = t1.team;
+        team6_p2 = t2.team;
+        team6_packed_p1 = t1.packed;
+        team6_packed_p2 = t2.packed;
+
+        team1Hash = sha256Hex(team6_packed_p1);
+        team2Hash = sha256Hex(team6_packed_p2);
+        team1Id = team1Hash.slice(0, 12);
+        team2Id = team2Hash.slice(0, 12);
       }
 
-      const team4_p1 = select4FromTeam(team6_p1, select4_p1);
-      const team4_p2 = select4FromTeam(team6_p2, select4_p2);
+      // Team preview (demo): call /select4 if python URL is provided; else take first 4.
+      phase = 'select4';
+      const rng1 = lcg(battleSeed * 1009 + 11);
+      const rng2 = lcg(battleSeed * 1009 + 22);
+      select4_p1 = sampleUniqueIndices(6, 4, rng1);
+      select4_p2 = sampleUniqueIndices(6, 4, rng2);
+      // Randomize lead order (first two are leads).
+      shuffleInPlace(select4_p1, rng1);
+      shuffleInPlace(select4_p2, rng2);
+
+      const team4_p1_raw = select4FromTeam(team6_p1, select4_p1);
+      const team4_p2_raw = select4FromTeam(team6_p2, select4_p2);
+
+      const team4_p1 = team4_p1_raw;
+      const team4_p2 = team4_p2_raw;
 
       const packed1 = Teams.pack(team4_p1);
       const packed2 = Teams.pack(team4_p2);
 
-      const policyMode1 = pythonUrl && p1Policy !== 'fallback' ? 'python' : 'fallback';
-      const policyMode2 = pythonUrl && p2Policy !== 'fallback' ? 'python' : 'fallback';
+      const isLocal = (p: string) => p === 'battle_policy' || p.startsWith('local:');
+      const policyMode1 = isLocal(p1Policy) ? 'local' : pythonUrl && p1Policy !== 'fallback' ? 'python' : 'fallback';
+      const policyMode2 = isLocal(p2Policy) ? 'local' : pythonUrl && p2Policy !== 'fallback' ? 'python' : 'fallback';
 
       phase = 'battle';
       const result = await runOneBattle({
@@ -441,9 +496,19 @@ async function main() {
         sim_ms: 0,
         winner: 'error',
         turns: 0,
-        p1: { policy: pythonUrl && p1Policy !== 'fallback' ? `python:${p1Policy}` : 'fallback', select4: undefined },
-        p2: { policy: pythonUrl && p2Policy !== 'fallback' ? `python:${p2Policy}` : 'fallback', select4: undefined },
-        teams: undefined,
+        p1: {
+          policy: pythonUrl && p1Policy !== 'fallback' ? `python:${p1Policy}` : 'fallback',
+          team_id: team1Id || undefined,
+          team_hash: team1Hash || undefined,
+          select4: select4_p1.length ? select4_p1 : undefined,
+        },
+        p2: {
+          policy: pythonUrl && p2Policy !== 'fallback' ? `python:${p2Policy}` : 'fallback',
+          team_id: team2Id || undefined,
+          team_hash: team2Hash || undefined,
+          select4: select4_p2.length ? select4_p2 : undefined,
+        },
+        teams: team6_packed_p1 && team6_packed_p2 ? { team1_packed: team6_packed_p1, team2_packed: team6_packed_p2 } : undefined,
         rng: { seed: battleSeed },
         error: { kind: e?.name ?? 'Error', message: errMessage, stack: errStack, phase },
       });

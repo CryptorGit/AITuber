@@ -28,7 +28,17 @@ $orchDir = Join-Path $repoRoot "apps/pokemon-showdown/vgc-demo/orchestrator"
 
 $pythonProc = $null
 
+$prevSaveReplay = $null
+$prevSaveSampleRate = $null
+
 try {
+  # Replay Studio's /replays view requires replays.jsonl. Enable replay saving by default
+  # for demo runs so results are visible in the UI.
+  $prevSaveReplay = $env:VGC_SAVE_REPLAY
+  $prevSaveSampleRate = $env:VGC_SAVE_SAMPLE_RATE
+  $env:VGC_SAVE_REPLAY = '1'
+  $env:VGC_SAVE_SAMPLE_RATE = '1'
+
   Write-Host "[vgc-demo] Starting Python policy server..."
   Push-Location $agentDir
   if (-not (Test-Path ".venv")) {
@@ -48,6 +58,10 @@ try {
   Pop-Location
 }
 finally {
+  # Restore env vars (avoid leaking settings into caller session).
+  if ($null -ne $prevSaveReplay) { $env:VGC_SAVE_REPLAY = $prevSaveReplay } else { Remove-Item Env:VGC_SAVE_REPLAY -ErrorAction SilentlyContinue }
+  if ($null -ne $prevSaveSampleRate) { $env:VGC_SAVE_SAMPLE_RATE = $prevSaveSampleRate } else { Remove-Item Env:VGC_SAVE_SAMPLE_RATE -ErrorAction SilentlyContinue }
+
   if ($pythonProc -and -not $pythonProc.HasExited) {
     Write-Host "[vgc-demo] Stopping Python policy server (pid=$($pythonProc.Id))..."
     try { Stop-Process -Id $pythonProc.Id -Force -ErrorAction SilentlyContinue } catch {}

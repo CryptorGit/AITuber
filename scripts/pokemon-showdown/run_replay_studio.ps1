@@ -169,6 +169,12 @@ if ($uiReady) {
   Write-Host "[run_replay_studio] UI did not respond: $uiUrl" -ForegroundColor Yellow
 }
 
+$exitCode = 0
+if (-not $serverReady) { $exitCode = 1 }
+if (-not $uiReady) { $exitCode = 1 }
+if ($serverProc.HasExited) { $exitCode = 1 }
+if ($uiProc.HasExited) { $exitCode = 1 }
+
 if ((-not $serverReady) -or (-not $uiReady) -or $serverProc.HasExited -or $uiProc.HasExited) {
   Write-Host "[run_replay_studio] Logs: $logDir" -ForegroundColor Cyan
 
@@ -202,3 +208,5 @@ if (-not $NoBrowser) {
 }
 
 Write-Host '[run_replay_studio] Done.' -ForegroundColor Gray
+
+exit $exitCode

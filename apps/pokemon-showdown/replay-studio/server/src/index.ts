@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import zlib from 'node:zlib';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -215,12 +216,32 @@ function primeDexOnce() {
 
 type DexListIconSheet = { kind: 'sheet'; url: string; size: number; x: number; y: number };
 type DexListIcon = DexListIconSheet;
-type DexListRow = { id: string; name: string; icon_url?: string; icon?: DexListIcon };
+type DexListRow = { id: string; name: string; icon_url?: string; icon?: DexListIcon; desc?: string };
+type DexSpeciesAbility = { slot: string; name: string };
+type DexSpeciesStats = { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
+type DexSpeciesListRow = DexListRow & {
+  num?: number;
+  types?: string[];
+  abilities?: DexSpeciesAbility[];
+  baseStats?: DexSpeciesStats;
+};
+type DexMoveDetailRow = {
+  id: string;
+  name: string;
+  type: string;
+  category?: string;
+  basePower: number;
+  accuracy: number;
+  pp: number;
+  desc: string;
+};
 
 let cachedSpecies: DexListRow[] | null = null;
+let cachedSpeciesDetailed: DexSpeciesListRow[] | null = null;
 let cachedItems: DexListRow[] | null = null;
 let cachedMoves: DexListRow[] | null = null;
 let cachedMovesBasic: { id: string; name: string }[] | null = null;
+let cachedMovesDetailed: DexMoveDetailRow[] | null = null;
 let cachedAbilities: DexListRow[] | null = null;
 let cachedNatures: DexListRow[] | null = null;
 let cachedTypes: DexListRow[] | null = null;
@@ -233,6 +254,16 @@ function showdownMonSpriteUrl(species: any) {
   return `/sprites/gen5/${encodeURIComponent(spriteId)}.png`;
 }
 
+function mapSpeciesAbilities(species: any): DexSpeciesAbility[] {
+  const abilities = species?.abilities ?? {};
+  const out: DexSpeciesAbility[] = [];
+  for (const slot of ['0', '1', 'H', 'S']) {
+    const name = abilities?.[slot];
+    if (name) out.push({ slot, name: String(name) });
+  }
+  return out;
+}
+
 function showdownItemSpriteUrl(id: string) {
   // Use locally proxied/cached sprites (served via /sprites/*).
   return `/sprites/items/${encodeURIComponent(id)}.png`;
@@ -242,10 +273,10 @@ function showdownItemIcon(item: any): DexListIconSheet | undefined {
   // Pokemon Showdown teambuilder uses a sprite sheet: /sprites/itemicons-sheet.png
   // Tiles are 24px and the sheet is 16 columns.
   const spriteNum = Number(item?.spritenum ?? 0);
-  if (!Number.isFinite(spriteNum) || spriteNum <= 0) return undefined;
+  if (!Number.isFinite(spriteNum)) return undefined;
   const size = 24;
   const cols = 16;
-  const idx = Math.max(0, Math.trunc(spriteNum) - 1);
+  const idx = Math.max(0, Math.trunc(spriteNum));
   const x = (idx % cols) * size;
   const y = Math.floor(idx / cols) * size;
   return { kind: 'sheet', url: '/sprites/itemicons-sheet.png', size, x, y };
@@ -317,8 +348,45 @@ function applyQuery<T extends { id: string; name: string }>(rows: readonly T[], 
   return scored.slice(0, limit).map((x) => x.row);
 }
 
+function moveDetailRow(m: any): DexMoveDetailRow {
+  return {
+    id: m.id,
+    name: m.name,
+    type: m.type,
+    category: m.category,
+    basePower: Number(m.basePower ?? 0) || 0,
+    accuracy: m.accuracy === true ? 0 : (Number(m.accuracy ?? 0) || 0),
+    pp: Number(m.pp ?? 0) || 0,
+    desc: String(m.shortDesc || m.desc || ''),
+  };
+}
+
 app.get('/api/dex/species', (req, res) => {
   primeDexOnce();
+  const q = normalizeQuery(req.query.q);
+  const detail = String(req.query.detail ?? '').toLowerCase();
+  const detailEnabled = detail === '1' || detail === 'true' || detail === 'yes';
+  const limit = Math.min(1000, Math.max(1, Number(req.query.limit ?? 300)));
+  if (detailEnabled) {
+    if (!cachedSpeciesDetailed) {
+      cachedSpeciesDetailed = dex.species
+        .all()
+        .filter((s) => s.exists && !s.isNonstandard)
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          num: Number(s.num ?? 0) || 0,
+          icon_url: showdownMonSpriteUrl(s),
+          types: Array.isArray(s.types) ? s.types.slice() : [],
+          abilities: mapSpeciesAbilities(s),
+          baseStats: s.baseStats as DexSpeciesStats,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    res.json({ items: applyQuery(cachedSpeciesDetailed, q, limit) });
+    return;
+  }
+
   if (!cachedSpecies) {
     cachedSpecies = dex.species
       .all()
@@ -326,8 +394,6 @@ app.get('/api/dex/species', (req, res) => {
       .map((s) => ({ id: s.id, name: s.name, icon_url: showdownMonSpriteUrl(s) }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
-  const q = normalizeQuery(req.query.q);
-  const limit = Math.min(1000, Math.max(1, Number(req.query.limit ?? 300)));
   res.json({ items: applyQuery(cachedSpecies, q, limit) });
 });
 
@@ -354,7 +420,7 @@ app.get('/api/dex/items', (req, res) => {
       .all()
       .filter((i) => i.exists && !i.isNonstandard)
       // Items don't have per-item PNGs on play.pokemonshowdown.com; the official teambuilder uses the sprite sheet.
-      .map((i) => ({ id: i.id, name: i.name, icon: showdownItemIcon(i) }))
+      .map((i) => ({ id: i.id, name: i.name, icon: showdownItemIcon(i), desc: String(i.shortDesc || i.desc || '') }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
   const q = normalizeQuery(req.query.q);
@@ -368,7 +434,7 @@ app.get('/api/dex/abilities', (req, res) => {
     cachedAbilities = dex.abilities
       .all()
       .filter((a) => a.exists && !a.isNonstandard)
-      .map((a) => ({ id: a.id, name: a.name }))
+      .map((a) => ({ id: a.id, name: a.name, desc: String(a.shortDesc || a.desc || '') }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
   const q = normalizeQuery(req.query.q);
@@ -384,26 +450,21 @@ app.get('/api/dex/moves', (req, res) => {
 
   // Detailed move rows can be large (desc text). Only return them for search queries.
   if (detailEnabled) {
-    if (!q) return res.json({ items: [] });
-    const limit = Math.min(400, Math.max(1, Number(req.query.limit ?? 120)));
-    const scored: Array<{ row: any; score: number }> = [];
-    for (const m of dex.moves.all()) {
-      if (!m.exists || m.isNonstandard) continue;
-      const score = scoreQueryMatch(m.name, m.id, q);
+    const limit = Math.min(4000, Math.max(1, Number(req.query.limit ?? 120)));
+    if (!cachedMovesDetailed) {
+      cachedMovesDetailed = dex.moves
+        .all()
+        .filter((m) => m.exists && !m.isNonstandard)
+        .map(moveDetailRow)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (!q) return res.json({ items: cachedMovesDetailed.slice(0, limit) });
+
+    const scored: Array<{ row: DexMoveDetailRow; score: number }> = [];
+    for (const row of cachedMovesDetailed) {
+      const score = scoreQueryMatch(row.name, row.id, q);
       if (score === null) continue;
-      scored.push({
-        score,
-        row: {
-          id: m.id,
-          name: m.name,
-          type: m.type,
-          category: m.category,
-          basePower: Number(m.basePower ?? 0) || 0,
-          accuracy: m.accuracy === true ? 0 : (Number(m.accuracy ?? 0) || 0),
-          pp: Number(m.pp ?? 0) || 0,
-          desc: String(m.shortDesc || m.desc || ''),
-        },
-      });
+      scored.push({ score, row });
     }
     scored.sort((a, b) => {
       if (a.score !== b.score) return a.score - b.score;
@@ -523,6 +584,19 @@ async function readJsonl(filePath: string, onRow: (row: any) => Promise<void> | 
   }
 }
 
+async function readJsonlGz(filePath: string, onRow: (row: any) => Promise<void> | void) {
+  const fileStream = fs.createReadStream(filePath);
+  const gunzip = zlib.createGunzip();
+  const stream = fileStream.pipe(gunzip);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!String(line).trim()) continue;
+    const row = safeJsonParse(String(line));
+    if (!row) continue;
+    await onRow(row);
+  }
+}
+
 function listTrainDirs() {
   if (!fs.existsSync(dataRoot)) return [] as string[];
   return fs
@@ -563,8 +637,9 @@ async function buildIndex(): Promise<IndexFile> {
   const entries: IndexEntry[] = [];
 
   for (const trainDir of listTrainDirs()) {
-    const battlesPath = path.join(trainDir, 'battles.jsonl');
     const batchesPath = path.join(trainDir, 'batches.jsonl');
+    const replaysPath = path.join(trainDir, 'replays.jsonl');
+    const replaysGzPath = path.join(trainDir, 'replays.jsonl.gz');
 
     const batchErrorRate = new Map<string, number>();
     if (fs.existsSync(batchesPath)) {
@@ -575,21 +650,30 @@ async function buildIndex(): Promise<IndexFile> {
       });
     }
 
-    if (!fs.existsSync(battlesPath)) continue;
-    await readJsonl(battlesPath, async (row) => {
+    // IMPORTANT: Only index battles that have a replay record. This prevents the UI from listing
+    // entries that cannot be opened/logged/exported.
+    const hasReplays = fs.existsSync(replaysPath) || fs.existsSync(replaysGzPath);
+    if (!hasReplays) continue;
+
+    const reader = fs.existsSync(replaysPath) ? readJsonl : readJsonlGz;
+    const filePath = fs.existsSync(replaysPath) ? replaysPath : replaysGzPath;
+
+    await reader(filePath, async (row) => {
       const battleId = row.battle_id;
       if (!battleId) return;
 
+      const batchId = row.batch_id ?? null;
+      const opponentId = row.opponent_id ?? null;
       entries.push({
         battle_id: String(battleId),
         run_id: row.run_id ?? null,
         format: row.format ?? null,
-        winner: row.winner ?? null,
-        turns: typeof row.turns === 'number' ? row.turns : null,
-        seed: typeof row.seed === 'number' ? row.seed : typeof row.rng?.seed === 'number' ? row.rng.seed : null,
-        opponent_id: row.opponent_id ?? null,
-        opponent_type: inferOpponentType(row.opponent_id),
-        error_rate: batchErrorRate.get(String(row.batch_id)) ?? null,
+        winner: row.expected_winner ?? row.winner ?? null,
+        turns: typeof row.expected_turns === 'number' ? row.expected_turns : typeof row.turns === 'number' ? row.turns : null,
+        seed: typeof row.seed === 'number' ? row.seed : null,
+        opponent_id: opponentId,
+        opponent_type: inferOpponentType(opponentId),
+        error_rate: batchId != null ? batchErrorRate.get(String(batchId)) ?? null : null,
         timestamp: row.started_at ?? row.finished_at ?? null,
         train_dir: path.basename(trainDir),
       });
@@ -609,7 +693,41 @@ async function buildIndex(): Promise<IndexFile> {
 }
 
 async function loadIndex({ refresh = false } = {}) {
-  if (!refresh && fs.existsSync(indexPath)) {
+  const shouldAutoRefresh = () => {
+    if (!fs.existsSync(indexPath)) return true;
+    let indexMtime = 0;
+    try {
+      indexMtime = fs.statSync(indexPath).mtimeMs;
+    } catch {
+      return true;
+    }
+
+    // If any train dir (or its replay file) is newer than the saved index,
+    // rebuild so the UI can see newly generated runs without a server restart.
+    for (const trainDir of listTrainDirs()) {
+      try {
+        if (fs.statSync(trainDir).mtimeMs > indexMtime + 1) return true;
+      } catch {
+        continue;
+      }
+
+      const replayPath = path.join(trainDir, 'replays.jsonl');
+      const replayGzPath = path.join(trainDir, 'replays.jsonl.gz');
+      for (const p of [replayPath, replayGzPath]) {
+        if (!fs.existsSync(p)) continue;
+        try {
+          if (fs.statSync(p).mtimeMs > indexMtime + 1) return true;
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    return false;
+  };
+
+  const effectiveRefresh = refresh || shouldAutoRefresh();
+  if (!effectiveRefresh && fs.existsSync(indexPath)) {
     try {
       return JSON.parse(fs.readFileSync(indexPath, 'utf8')) as IndexFile;
     } catch {
@@ -622,10 +740,14 @@ async function loadIndex({ refresh = false } = {}) {
 async function findReplayRecord(trainDirName: string, battleId: string) {
   const trainDir = path.join(dataRoot, trainDirName);
   const replayPath = path.join(trainDir, 'replays.jsonl');
-  if (!fs.existsSync(replayPath)) return null;
+  const replayGzPath = path.join(trainDir, 'replays.jsonl.gz');
+  if (!fs.existsSync(replayPath) && !fs.existsSync(replayGzPath)) return null;
 
   let found: any = null;
-  await readJsonl(replayPath, async (row) => {
+
+  const reader = fs.existsSync(replayPath) ? readJsonl : readJsonlGz;
+  const p = fs.existsSync(replayPath) ? replayPath : replayGzPath;
+  await reader(p, async (row) => {
     if (row.battle_id === battleId) found = row;
   });
   return found;
@@ -775,7 +897,11 @@ async function getOrCreateBattleLog(trainDirName: string, battleId: string) {
   }
 
   const record = await findReplayRecord(trainDirName, battleId);
-  if (!record) throw new Error(`Replay record not found: ${battleId}`);
+  if (!record) {
+    throw new Error(
+      `Replay record not found: ${battleId} (no replays.jsonl in ${trainDirName}; replay saving may have been disabled)`
+    );
+  }
 
   const logText = await generateBattleLog(record);
   fs.writeFileSync(logPath, logText, 'utf8');
@@ -843,6 +969,14 @@ app.get('/api/replays/:battleId', async (req, res) => {
   if (!meta) return res.status(404).json({ error: 'battle_id not found in index' });
 
   const record = await findReplayRecord(meta.train_dir, battleId);
+  if (!record) {
+    return res.status(404).json({
+      error: 'replay_record_missing',
+      message:
+        'This battle is indexed (from battles.jsonl) but no replay record exists (replays.jsonl / replays.jsonl.gz is missing for this train_dir). Rerun with replay saving enabled (VGC_SAVE_REPLAY=1) and sample rate 1 (VGC_SAVE_SAMPLE_RATE=1) if you want to view it in Replay Studio.',
+      meta,
+    });
+  }
   res.json({ meta, record });
 });
 
@@ -856,7 +990,11 @@ app.get('/api/replays/:battleId/log', async (req, res) => {
     const logText = await getOrCreateBattleLog(meta.train_dir, battleId);
     res.type('text/plain').send(logText);
   } catch (e: any) {
-    res.status(500).json({ error: String(e?.message ?? e) });
+    const msg = String(e?.message ?? e);
+    if (msg.includes('Replay record not found:')) {
+      return res.status(404).json({ error: 'replay_record_missing', message: msg, meta });
+    }
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -1004,7 +1142,7 @@ const settingsPath = path.join(configRoot, 'train_settings.json');
 
 app.get('/api/config/pool', (req, res) => {
   try {
-    const cfg = readOrCreateConfig(poolPath, poolSchema, { version: 1, updated_at: new Date().toISOString(), pool: [] });
+    const cfg = readOrCreateConfig(poolPath, poolSchema, { version: 1, updated_at: new Date().toISOString(), team6: [], pool: [] });
     res.json(cfg);
   } catch (e: any) {
     res.status(500).json({ error: String(e?.message ?? e) });

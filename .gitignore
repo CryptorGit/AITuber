@@ -37,6 +37,32 @@ Desktop.ini
 ### Node
 **/node_modules/
 
+# Node/TS build + cache artifacts
+**/dist/
+**/build/
+**/.vite/
+**/.next/
+**/.nuxt/
+**/.svelte-kit/
+**/coverage/
+**/.turbo/
+**/.parcel-cache/
+**/.cache/
+**/.eslintcache
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Test tool outputs
+**/playwright-report/
+**/test-results/
+
+# Generated/vendor assets pulled from Pokemon Showdown (keep local, don't commit)
+/web/pokemon-showdown/replay-studio/ui/public/ps/
+
 
 ### Third-party SDKs / large assets (do not commit)
 /tools/

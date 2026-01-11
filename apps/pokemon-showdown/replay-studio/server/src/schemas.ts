@@ -34,25 +34,29 @@ const moves4Schema = z
   });
 
 const poolEntrySchema = z.object({
-  name: z.string().default(''),
-  species: z.string().min(1),
-  level: z.number().int().min(1).max(100).default(50),
-  gender: genderSchema,
-  shiny: z.boolean().default(false),
-  happiness: z.number().int().min(0).max(255).default(255),
-  item: z.string().default(''),
-  ability: z.string().default(''),
-  nature: z.string().default(''),
-  evs: evSchema.default({}),
-  ivs: ivSchema.default({}),
-  moves: moves4Schema,
-  teraType: z.string().default(''),
-  hpType: z.string().default(''),
-  pokeball: z.string().default(''),
-  gigantamax: z.boolean().default(false),
-  dynamaxLevel: z.number().int().min(0).max(10).default(10),
-}).superRefine((val, ctx) => {
-  const evs = val.evs ?? {};
+  id: z.string().default(''),
+  species: z.string().default(''),
+  setText: z.string().optional(),
+  setObj: z.any().optional(),
+  name: z.string().optional(),
+  level: z.number().int().min(1).max(100).optional(),
+  gender: genderSchema.optional(),
+  shiny: z.boolean().optional(),
+  happiness: z.number().int().min(0).max(255).optional(),
+  item: z.string().optional(),
+  ability: z.string().optional(),
+  nature: z.string().optional(),
+  evs: evSchema.optional(),
+  ivs: ivSchema.optional(),
+  moves: moves4Schema.optional(),
+  teraType: z.string().optional(),
+  hpType: z.string().optional(),
+  pokeball: z.string().optional(),
+  gigantamax: z.boolean().optional(),
+  dynamaxLevel: z.number().int().min(0).max(10).optional(),
+}).passthrough().superRefine((val, ctx) => {
+  const evs = val.evs;
+  if (!evs) return;
   const sum = (evs.hp ?? 0) + (evs.atk ?? 0) + (evs.def ?? 0) + (evs.spa ?? 0) + (evs.spd ?? 0) + (evs.spe ?? 0);
   if (sum > 510) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: `EV total must be <= 510 (got ${sum})` });
@@ -62,6 +66,8 @@ const poolEntrySchema = z.object({
 export const poolSchema = z.object({
   version: z.literal(1).default(1),
   updated_at: z.string().optional(),
+  // Selected team of 6 (by pool entry id). Orchestrator uses this as the player's roster.
+  team6: z.array(z.string()).optional(),
   pool: z.array(poolEntrySchema),
 });
 

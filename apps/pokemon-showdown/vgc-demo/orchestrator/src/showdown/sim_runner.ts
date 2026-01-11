@@ -2,6 +2,7 @@ import * as BattleStreamMod from '../../../../../../tools/pokemon-showdown/pokem
 import type { ChoiceRequest } from '../../../../../../tools/pokemon-showdown/pokemon-showdown/sim/side';
 
 import { appendJsonl } from '../io/jsonl';
+import { chooseLocal, type LocalPolicyDebug } from '../ai/battle_policy';
 
 const DEBUG = process.env.VGC_DEMO_DEBUG === '1';
 
@@ -61,7 +62,7 @@ export type BattleResult = {
   error?: string;
 };
 
-type PolicyMode = 'fallback' | 'python';
+type PolicyMode = 'fallback' | 'python' | 'local';
 
 type PythonClient = {
   baseUrl: string;
@@ -77,6 +78,7 @@ export type TraceDecisionEvent = {
   choice_raw: string;
   choice_norm: string;
   choice_source: 'python' | 'fallback' | 'python_error';
+  policy_debug?: LocalPolicyDebug;
 };
 
 type TraceFn = (evt: TraceDecisionEvent) => void;
@@ -209,14 +211,37 @@ function nowMs() {
   return Date.now();
 }
 
-function moveTargetArg(target: string | undefined): string {
+function isAllyTargetType(target: string | undefined): boolean {
+  const t = String(target ?? '');
+  return t === 'adjacentAlly' || t === 'ally' || t === 'adjacentAllyOrSelf';
+}
+
+function moveTargetArg(target: string | undefined, activeIndex: number, hasPartner: boolean): string {
   // Default targets for common doubles single-target moves.
   // NOTE: only use this when the request target indicates target selection.
   if (!target) return '';
   const t = String(target);
-  if (t === 'normal' || t === 'adjacentFoe') return ' 1';
-  if (t === 'adjacentAlly' || t === 'ally' || t === 'adjacentAllyOrSelf') return ' -1';
-  return '';
+  // Many single-target moves use these target types.
+  // Some moves (e.g. Aura Sphere) may report broader target types like "any".
+  // When we know a move requires a target, defaulting to the primary foe ("1")
+  // is safer than emitting an invalid choice that can stall the battle.
+  if (t === 'normal' || t === 'adjacentFoe' || t === 'any' || t === 'anyAdjacentFoe' || t === 'randomNormal') return ' 1';
+
+  // Ally-targeting support moves (e.g. Helping Hand).
+  // In doubles, targetLoc is negative for allies and positive for foes.
+  // Self is -1 (left) / -2 (right). Partner is the opposite.
+  if (t === 'adjacentAllyOrSelf') {
+    // Prefer partner when available; otherwise self.
+    if (hasPartner) return activeIndex === 0 ? ' -2' : ' -1';
+    return activeIndex === 0 ? ' -1' : ' -2';
+  }
+  if (t === 'adjacentAlly' || t === 'ally') {
+    if (!hasPartner) return '';
+    return activeIndex === 0 ? ' -2' : ' -1';
+  }
+
+  // Unknown target types: pick a safe foe target.
+  return ' 1';
 }
 
 function normalizeChoiceForRequest(choice: string, req: any): string {
@@ -237,17 +262,65 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
   const actionableActives = allActives.filter((a: any) => Array.isArray(a?.moves) && a.moves.length > 0);
   let actives = actionableActives.length > 0 ? actionableActives : allActives;
 
+  const sideMons = Array.isArray(req?.side?.pokemon) ? (req.side.pokemon as any[]) : [];
+  const activesFromSide = sideMons.filter((p) => p && typeof p === 'object' && p.active);
+  const aliveActivesFromSide = activesFromSide.filter((p) => {
+    if (p?.fainted) return false;
+    const cond = String(p?.condition ?? '');
+    if (cond === '0 fnt' || cond === '0fnt') return false;
+    return true;
+  });
+  const hasPartner = aliveActivesFromSide.length >= 2;
+
+  const forceNeedsTargetMoveIds = new Set<string>([
+    'aurasphere',
+    'shadowball',
+    'darkpulse',
+    'thunderbolt',
+    'icebeam',
+    'flamethrower',
+    'energyball',
+  ]);
+
+  const pickFirstLegalMovePart = (active: any, activeIndex: number): string | null => {
+    const moves = Array.isArray(active?.moves) ? active.moves : [];
+    for (let j = 0; j < moves.length; j++) {
+      const m = moves[j];
+      if (!m || typeof m !== 'object') continue;
+      if (m.disabled) continue;
+      const targetType = m?.target as string | undefined;
+      // Avoid ally-only targets when there is no partner alive.
+      if (!hasPartner && (targetType === 'adjacentAlly' || targetType === 'ally')) continue;
+
+      const slot = j + 1;
+      const id = String(m?.id ?? '').toLowerCase();
+      if (!targetType) {
+        if (forceNeedsTargetMoveIds.has(id)) return `move ${slot} 1`;
+        return `move ${slot}`;
+      }
+      const arg = moveTargetArg(targetType, activeIndex, hasPartner);
+      const needsTarget =
+        targetType === 'normal' ||
+        targetType === 'adjacentFoe' ||
+        targetType === 'any' ||
+        targetType === 'anyAdjacentFoe' ||
+        targetType === 'randomNormal' ||
+        targetType === 'adjacentAlly' ||
+        targetType === 'ally' ||
+        targetType === 'adjacentAllyOrSelf';
+      if (needsTarget) {
+        if (arg) return `move ${slot}${arg}`;
+        // No valid target available for this move.
+        continue;
+      }
+      return `move ${slot}`;
+    }
+    return null;
+  };
+
   // Special case: only one choice part in doubles.
   // If only one active is actually alive, use that position's request entry.
   if (parts.length === 1 && allActives.length === 2) {
-    const sideMons = Array.isArray(req?.side?.pokemon) ? (req.side.pokemon as any[]) : [];
-    const activesFromSide = sideMons.filter((p) => p && typeof p === 'object' && p.active);
-    const aliveActivesFromSide = activesFromSide.filter((p) => {
-      if (p?.fainted) return false;
-      const cond = String(p?.condition ?? '');
-      if (cond === '0 fnt' || cond === '0fnt') return false;
-      return true;
-    });
     if (activesFromSide.length === 2 && aliveActivesFromSide.length === 1) {
       const aliveIndex = activesFromSide.indexOf(aliveActivesFromSide[0]);
       if (aliveIndex === 0 || aliveIndex === 1) {
@@ -280,8 +353,16 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
     const hadTarget = typeof m[2] === 'string' && m[2].length > 0;
     const moveObj = Array.isArray(active?.moves) ? active.moves[moveSlot - 1] : null;
     const targetType = moveObj?.target as string | undefined;
+    const actualActiveIndex = allActives.length === 2 ? Math.max(0, allActives.indexOf(active)) : 0;
     const moveId = String(moveObj?.id ?? '').toLowerCase();
     const moveName = String(moveObj?.move ?? '').toLowerCase();
+
+    // Hard guarantee: never emit a disabled move.
+    if (moveObj?.disabled) {
+      const repl = pickFirstLegalMovePart(active, actualActiveIndex);
+      normalized.push(repl ?? 'default');
+      continue;
+    }
 
     // Some request payloads have unreliable `target` metadata for a subset of moves.
     // Patch up obvious no-target moves using only request-visible identifiers.
@@ -325,6 +406,10 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
       moveName === 'tailwind' ||
       moveName === 'nasty plot';
 
+    // Some single-target moves occasionally arrive without target metadata.
+    // If the user doesn't provide an explicit target, default it.
+    const forceNeedsTarget = forceNeedsTargetMoveIds.has(moveId);
+
     if (DEBUG && debugNormalized < 6 && hadTarget && (moveSlot === 3 || moveSlot === 4)) {
       debugNormalized++;
       console.log(
@@ -342,20 +427,54 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
     }
 
     if (!targetType) {
+      // Some moves arrive without reliable target metadata even though Showdown
+      // requires an explicit target (e.g. Aura Sphere in doubles).
+      // If the move is not in our known no-target list and a target wasn't
+      // provided, default to the primary foe ("1"). This is safer than emitting
+      // an invalid choice that can stall the battle.
+      if ((!forceNoTarget && forceNeedsTarget && !hadTarget) || (!forceNoTarget && !hadTarget && part.startsWith('move '))) {
+        normalized.push(`move ${moveSlot} 1`);
+        continue;
+      }
       normalized.push(part);
+      continue;
+    }
+
+    // Repair ally-targeting moves so we don't emit invalid target choices.
+    // This is especially important for external policies that might keep
+    // choosing Helping Hand even after the partner faints.
+    if (isAllyTargetType(targetType)) {
+      // adjacentAlly/ally requires a living partner.
+      if ((targetType === 'adjacentAlly' || targetType === 'ally') && !hasPartner) {
+        const repl = pickFirstLegalMovePart(active, actualActiveIndex);
+        normalized.push(repl ?? 'default');
+        continue;
+      }
+      // Otherwise, force a valid ally/self target.
+      const arg = moveTargetArg(targetType, actualActiveIndex, hasPartner);
+      if (arg) {
+        normalized.push(`move ${moveSlot}${arg}`);
+        continue;
+      }
+      const repl = pickFirstLegalMovePart(active, actualActiveIndex);
+      normalized.push(repl ?? 'default');
       continue;
     }
 
     const needsTarget =
       !forceNoTarget &&
-      (targetType === 'normal' ||
+      (forceNeedsTarget ||
+        targetType === 'normal' ||
         targetType === 'adjacentFoe' ||
+        targetType === 'any' ||
+        targetType === 'anyAdjacentFoe' ||
+        targetType === 'randomNormal' ||
         targetType === 'adjacentAlly' ||
         targetType === 'ally' ||
         targetType === 'adjacentAllyOrSelf');
 
     if (needsTarget && !hadTarget) {
-      normalized.push(`move ${moveSlot}${moveTargetArg(targetType)}`);
+      normalized.push(`move ${moveSlot}${moveTargetArg(targetType, actualActiveIndex, hasPartner)}`);
       continue;
     }
     if (!needsTarget && hadTarget) {
@@ -397,6 +516,18 @@ function pickRandomChoiceFromRequest(req: any, seed: number): string {
   const active = (req?.active ?? []) as any[];
   const side = req?.side ?? {};
 
+  const sideMons = (side?.pokemon ?? []) as any[];
+  const aliveActiveCount = Array.isArray(sideMons)
+    ? sideMons.filter((p: any) => {
+        if (!p?.active) return false;
+        if (p?.fainted) return false;
+        const cond = String(p?.condition ?? '');
+        if (cond === '0 fnt' || cond === '0fnt') return false;
+        return true;
+      }).length
+    : 0;
+  const hasPartner = aliveActiveCount >= 2;
+
   // Team preview: pick an order for the visible team (first two are leads in doubles).
   if (req?.teamPreview) {
     const n = Array.isArray(side?.pokemon) ? side.pokemon.length : 0;
@@ -416,14 +547,15 @@ function pickRandomChoiceFromRequest(req: any, seed: number): string {
     .map((p, i) => ({ p, slot: i + 1 }))
     .filter((x) => !x.p?.active && !x.p?.fainted && x.p?.condition !== '0 fnt');
 
-  const pickForActive = (a: any) => {
+  const pickForActive = (a: any, activeIndex: number) => {
     const moves = (a?.moves ?? [])
       .map((m: any, i: number) => ({ ...m, __slot: i + 1 }))
-      .filter((m: any) => !m?.disabled);
+      .filter((m: any) => !m?.disabled)
+      .filter((m: any) => (hasPartner ? true : !isAllyTargetType(m?.target)));
     if (moves.length > 0) {
       const m = moves[Math.floor(rng() * moves.length)];
       const moveSlot = Number(m.__slot);
-      return `move ${moveSlot}${moveTargetArg(m?.target)}`;
+      return `move ${moveSlot}${moveTargetArg(m?.target, activeIndex, hasPartner)}`;
     }
     if (canSwitch && switchSlots.length > 0) {
       const s = switchSlots[Math.floor(rng() * switchSlots.length)];
@@ -452,7 +584,7 @@ function pickRandomChoiceFromRequest(req: any, seed: number): string {
   }
 
   if (active.length <= 1) {
-    return pickForActive(active[0]);
+    return pickForActive(active[0], 0);
   }
 
   // In doubles, the request may include null/empty entries for slots that can't act.
@@ -469,9 +601,10 @@ function pickRandomChoiceFromRequest(req: any, seed: number): string {
   const expectedChoices = activeCountFromSide > 0 ? activeCountFromSide : active.length;
 
   const choices: string[] = [];
-  for (const a of active) {
+  for (let i = 0; i < active.length; i++) {
+    const a = active[i];
     if (!a) continue;
-    choices.push(pickForActive(a));
+    choices.push(pickForActive(a, i));
     if (choices.length >= expectedChoices) break;
   }
 
@@ -622,9 +755,10 @@ export async function runOneBattle(opts: {
       const hadInvalid = isInvalidChoiceError(p1.lastError);
       if (hadInvalid) p1.lastError = null;
 
+      const choiceAttempt = p1.choiceCount;
       let d = await getChoiceForPlayer({
         req: r1,
-        seed: opts.seed + turns * 17 + 1,
+        seed: opts.seed + turns * 17 + 1 + choiceAttempt * 997,
         formatId: opts.formatId,
         policyMode: opts.p1.policyMode,
         python: opts.p1.python,
@@ -634,7 +768,7 @@ export async function runOneBattle(opts: {
       });
 
       if (hadInvalid || choiceLooksDisabledInRequest(d.choice_norm, r1)) {
-        const fallback = pickRandomChoiceFromRequest(r1, opts.seed + turns * 17 + 1);
+        const fallback = pickRandomChoiceFromRequest(r1, opts.seed + turns * 17 + 1 + choiceAttempt * 997 + 123);
         d = { choice_raw: d.choice_raw, choice_norm: fallback, choice_source: 'fallback' };
       }
       if (opts.trace) {
@@ -647,6 +781,7 @@ export async function runOneBattle(opts: {
           choice_raw: d.choice_raw,
           choice_norm: d.choice_norm,
           choice_source: d.choice_source,
+          policy_debug: d.policy_debug,
         });
       }
       p1.lastRequest = null;
@@ -661,9 +796,10 @@ export async function runOneBattle(opts: {
       const hadInvalid = isInvalidChoiceError(p2.lastError);
       if (hadInvalid) p2.lastError = null;
 
+      const choiceAttempt = p2.choiceCount;
       let d = await getChoiceForPlayer({
         req: r2,
-        seed: opts.seed + turns * 17 + 2,
+        seed: opts.seed + turns * 17 + 2 + choiceAttempt * 997,
         formatId: opts.formatId,
         policyMode: opts.p2.policyMode,
         python: opts.p2.python,
@@ -673,7 +809,7 @@ export async function runOneBattle(opts: {
       });
 
       if (hadInvalid || choiceLooksDisabledInRequest(d.choice_norm, r2)) {
-        const fallback = pickRandomChoiceFromRequest(r2, opts.seed + turns * 17 + 2);
+        const fallback = pickRandomChoiceFromRequest(r2, opts.seed + turns * 17 + 2 + choiceAttempt * 997 + 456);
         d = { choice_raw: d.choice_raw, choice_norm: fallback, choice_source: 'fallback' };
       }
       if (opts.trace) {
@@ -686,6 +822,7 @@ export async function runOneBattle(opts: {
           choice_raw: d.choice_raw,
           choice_norm: d.choice_norm,
           choice_source: d.choice_source,
+          policy_debug: d.policy_debug,
         });
       }
       p2.lastRequest = null;
@@ -716,8 +853,24 @@ export async function runOneBattle(opts: {
     log,
     ms,
     formatId: opts.formatId,
-    p1: { name: opts.p1.name, policy: opts.p1.policyMode === 'python' ? `python:${opts.p1.python?.policy}` : 'fallback' },
-    p2: { name: opts.p2.name, policy: opts.p2.policyMode === 'python' ? `python:${opts.p2.python?.policy}` : 'fallback' },
+    p1: {
+      name: opts.p1.name,
+      policy:
+        opts.p1.policyMode === 'python'
+          ? `python:${opts.p1.python?.policy}`
+          : opts.p1.policyMode === 'local'
+            ? 'local:battle_policy'
+            : 'fallback',
+    },
+    p2: {
+      name: opts.p2.name,
+      policy:
+        opts.p2.policyMode === 'python'
+          ? `python:${opts.p2.python?.policy}`
+          : opts.p2.policyMode === 'local'
+            ? 'local:battle_policy'
+            : 'fallback',
+    },
   };
 }
 
@@ -730,7 +883,12 @@ async function getChoiceForPlayer(args: {
   turn: number;
   player: string;
   debug?: DebugCtx;
-}): Promise<{ choice_raw: string; choice_norm: string; choice_source: 'python' | 'fallback' | 'python_error' }> {
+}): Promise<{
+  choice_raw: string;
+  choice_norm: string;
+  choice_source: 'python' | 'fallback' | 'python_error' | 'local';
+  policy_debug?: LocalPolicyDebug;
+}> {
   if (args.policyMode === 'python' && args.python) {
     try {
       const res = await postJson(`${args.python.baseUrl}/choose`, {
@@ -776,6 +934,23 @@ async function getChoiceForPlayer(args: {
       return { choice_raw: raw, choice_norm: normalized, choice_source: 'python_error' };
     }
   }
+
+  if (args.policyMode === 'local') {
+    const local = chooseLocal(args.req, args.seed, args.turn);
+    const raw = String(local.choice ?? '').trim();
+    const normalized = normalizeChoiceForRequest(raw, args.req);
+    debugEmit(args.debug, {
+      type: 'choice',
+      player: args.player,
+      turn: args.turn,
+      source: 'local',
+      choice_raw: raw,
+      choice: normalized,
+      changed: normalized !== raw,
+    });
+    return { choice_raw: raw, choice_norm: normalized, choice_source: 'local', policy_debug: local.debug };
+  }
+
   const raw = pickRandomChoiceFromRequest(args.req, args.seed);
   const normalized = normalizeChoiceForRequest(raw, args.req);
   debugEmit(args.debug, {

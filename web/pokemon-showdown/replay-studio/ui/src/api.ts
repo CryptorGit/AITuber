@@ -15,8 +15,18 @@ export type ReplayListItem = {
 export type DexListItem = {
   id: string;
   name: string;
+  num?: number;
   icon_url?: string;
   icon?: { kind: 'sheet'; url: string; size: number; x: number; y: number };
+  desc?: string;
+  type?: string;
+  category?: string;
+  basePower?: number;
+  accuracy?: number;
+  pp?: number;
+  types?: string[];
+  abilities?: Array<{ slot: string; name: string }>;
+  baseStats?: { hp: number; atk: number; def: number; spa: number; spd: number; spe: number };
 };
 
 export type DexListResponse = {
@@ -79,7 +89,7 @@ export async function apiPost<T>(url: string, body: any): Promise<T> {
   return (await r.json()) as T;
 }
 
-export type DexListQuery = { q?: string; only?: string };
+export type DexListQuery = { q?: string; only?: string; detail?: string | boolean };
 
 export async function apiDexList(
   kind: 'species' | 'items' | 'moves' | 'abilities' | 'natures' | 'formats' | 'types',
@@ -88,9 +98,11 @@ export async function apiDexList(
 ) {
   const q = typeof qOrOpts === 'string' ? qOrOpts : qOrOpts?.q;
   const only = typeof qOrOpts === 'string' ? onlyMaybe : qOrOpts?.only;
+  const detail = typeof qOrOpts === 'string' ? undefined : qOrOpts?.detail;
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (only) params.set('only', only);
+  if (detail) params.set('detail', detail === true ? '1' : String(detail));
   // Keep payloads reasonable; UI does client-side filtering on the fetched set.
   params.set(
     'limit',

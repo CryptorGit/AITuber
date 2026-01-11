@@ -1,0 +1,8 @@
+{
+  "format": "gen9vgc2026regf",
+  "n_battles": 200,
+  "python_url": "http://127.0.0.1:8099",
+  "p1_policy": "heuristic",
+  "p2_policy": "heuristic",
+  "seed": 0
+}

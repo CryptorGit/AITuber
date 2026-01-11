@@ -1,0 +1,20 @@
+{
+  "name": "vgc-demo-orchestrator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "tsx src/bootstrap.ts",
+    "selfplay": "tsx src/bootstrap_selfplay.ts",
+    "train": "tsx src/bootstrap_train.ts",
+    "replay": "tsx src/bootstrap_replay.ts",
+    "replay:latest": "tsx src/bootstrap_replay_latest.ts",
+    "replay:pick": "tsx src/bootstrap_replay_pick.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.19.2",
+    "ts-chacha20": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  }
+}

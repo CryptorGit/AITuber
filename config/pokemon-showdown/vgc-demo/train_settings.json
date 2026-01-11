@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated_at": "2026-01-09T13:57:07.126Z",
+  "format": "gen9vgc2026regf",
+  "epochs": 1,
+  "snapshotEvery": 1,
+  "opponentPool": [],
+  "seed": 0,
+  "battlesPerBatch": 20,
+  "timeoutMs": 30000
+}

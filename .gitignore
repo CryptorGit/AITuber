@@ -34,12 +34,16 @@ Thumbs.db
 Desktop.ini
 .vscode/
 
+### Node
+**/node_modules/
+
+
 ### Third-party SDKs / large assets (do not commit)
 /tools/
 
 ### Live2D web assets (licensed / user-provided)
-/web/main/vendor/live2dcubismcore*.js
-/web/main/models/
+/web/stream_studio/vendor/live2dcubismcore*.js
+/web/stream_studio/models/
 
 ### Local test artifacts
 /tests/image_test.jpg

@@ -26,13 +26,13 @@ Invoke-RestMethod http://127.0.0.1:8000/tts/health
 
 ## Perf / 計測
 
-- サーバ: `data/events.jsonl` に `type=timing` が追記されます（同一 `request_id` で相関）
+- サーバ: `data/stream_studio/events.jsonl` に `type=timing` が追記されます（同一 `request_id` で相関）
 - ブラウザ console: `[aituber/perf]` が出ます（送信→字幕反映、音声再生開始など）
 
 ## Docs
 
-- [docs/overview.md](docs/overview.md)
-- [docs/runbook.md](docs/runbook.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/schemas.md](docs/schemas.md)
-- [docs/ROADMAP.md](docs/ROADMAP.md)
+- [docs/stream_studio/overview.md](docs/stream_studio/overview.md)
+- [docs/stream_studio/runbook.md](docs/stream_studio/runbook.md)
+- [docs/stream_studio/ARCHITECTURE.md](docs/stream_studio/ARCHITECTURE.md)
+- [docs/stream_studio/schemas.md](docs/stream_studio/schemas.md)
+- [docs/stream_studio/ROADMAP.md](docs/stream_studio/ROADMAP.md)

@@ -1,11 +1,33 @@
 param(
   [string]$HostAddr = '127.0.0.1',
   [int]$Port = 8000,
-  [bool]$Reload = $true,
-  [bool]$EnsureGoogleTts = $true
+  [string]$Reload = 'true',
+  [string]$EnsureGoogleTts = 'true'
 )
 
 $ErrorActionPreference = 'Stop'
+
+function ConvertTo-Bool {
+  param(
+    [object]$Value,
+    [bool]$Default = $true
+  )
+  try {
+    if ($null -eq $Value) { return $Default }
+    if ($Value -is [bool]) { return [bool]$Value }
+    if ($Value -is [int]) { return ([int]$Value) -ne 0 }
+    $s = ("$Value").Trim().ToLower()
+    if (-not $s) { return $Default }
+    if ($s -in @('1','true','yes','on','$true')) { return $true }
+    if ($s -in @('0','false','no','off','$false')) { return $false }
+    return $Default
+  } catch {
+    return $Default
+  }
+}
+
+$Reload = ConvertTo-Bool -Value $Reload -Default $true
+$EnsureGoogleTts = ConvertTo-Bool -Value $EnsureGoogleTts -Default $true
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $repoRoot
@@ -135,6 +157,14 @@ Write-Host "Server PID: $($serverProc.Id)" -ForegroundColor Gray
 Write-Host "Stop: .\scripts\stream_studio\stop_stack.ps1" -ForegroundColor Gray
 Write-Host "Log(out): $serverOutLog" -ForegroundColor Gray
 Write-Host "Log(err): $serverErrLog" -ForegroundColor Gray
+
+# NOTE: When launched via VS Code tasks, child processes can receive a console close
+# event when the task finishes, which can kill native deps (forrtl error 200).
+# Keep the task alive in VS Code to avoid the close event.
+if (-not $Reload -and ($env:VSCODE_PID + '').Trim()) {
+  Write-Host '[run_stack] VS Code task detected; keeping task alive (server is detached). Use stop_stack.ps1 to stop.' -ForegroundColor DarkGray
+  while ($true) { Start-Sleep -Seconds 3600 }
+}
 
 # Detach: do not wait for the server process.
 return

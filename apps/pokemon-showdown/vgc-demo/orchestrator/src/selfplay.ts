@@ -4,6 +4,15 @@ import { resolveFormatIdOrSuggest } from './showdown/format_resolver';
 import { appendJsonl } from './io/jsonl';
 import { aggregateSummary, makeRunId, parseArgs, repoRoot, sha256Hex, readJsonl } from './shared';
 import { initRunPaths, runBattlesChunk, type BatchMeta } from './run_battles';
+import { LeagueManager } from './ppo/league_manager';
+import { PpoClient } from './ppo/ppo_client';
+import { RolloutCollector } from './ppo/rollout_collector';
+import { resolvePpoRolloutLen } from './ppo/rollout_config';
+
+function isPpoPolicy(p: string): boolean {
+  const s = String(p ?? '').trim();
+  return s === 'ppo' || s === 'learner' || s === 'baseline' || s === 'league' || s.startsWith('snapshot:');
+}
 
 // Fixed batch size baseline.
 const BATCH_SIZE = 20;
@@ -63,6 +72,20 @@ async function main() {
   const runId = makeRunId();
   const opponentId = `policy:${p2Policy}`;
 
+  // Optional: share PPO objects across batches.
+  const ppoEnabled = isPpoPolicy(p1Policy) || isPpoPolicy(p2Policy);
+  const ppo = ppoEnabled && pythonUrl
+    ? (() => {
+        const cfg = resolvePpoRolloutLen();
+        const client = new PpoClient(String(pythonUrl).trim().replace(/\/+$/, ''));
+        return {
+          client,
+          collector: new RolloutCollector(client, cfg.value),
+          league: new LeagueManager(client),
+        };
+      })()
+    : null;
+
   for (let b = 0; b < nBatches; b++) {
     const batchSeed = seed + b * 100_000;
     const batchId = sha256Hex(`${resolved.id}:${seed}:${b}:${p1Policy}:${opponentId}`).slice(0, 16);
@@ -87,6 +110,7 @@ async function main() {
       saveCfg,
       paths,
       batch,
+      ppo: ppo ?? undefined,
     });
 
     const batchSummary = aggregateSummary(rows);

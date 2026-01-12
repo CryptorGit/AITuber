@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 if (-not $HostAddr) { $HostAddr = "127.0.0.1" }
 if (-not $Port) { $Port = 8000 }
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $repoRoot
 
 # Use .env/.env.main (local file) for the main app.
@@ -43,7 +43,7 @@ try {
 # Default: suppress access log. Set AITUBER_UVICORN_ACCESS_LOG=1 to re-enable.
 $accessLog = (($env:AITUBER_UVICORN_ACCESS_LOG + '').Trim().ToLower())
 
-$args = @('scripts/run_uvicorn.py','--host',$HostAddr,'--port',[string]$Port)
+$args = @('scripts/stream_studio/run_uvicorn.py','--host',$HostAddr,'--port',[string]$Port)
 if ($accessLog -in @('1','true','yes','on')) {
   $args += '--access-log'
 }

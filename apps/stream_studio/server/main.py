@@ -37,6 +37,7 @@ from apps.stream_studio.tts.service import TTSService
 from apps.stream_studio.vlm.screenshot import ScreenshotCapturer
 from apps.stream_studio.vlm.summarizer import VLMSummarizer
 from apps.stream_studio.llm.gemini_mvp import GeminiMVP
+from apps.stream_studio.llm.anim_selector import AnimationLLMConfig, AnimationSelectOut, select_animation
 from apps.stream_studio.stt.vad import VADConfig
 from apps.stream_studio.stt.whisper_service import WhisperConfig, transcribe_pcm_with_vad, get_model
 
@@ -775,12 +776,71 @@ def _state_path(data_dir: Path) -> Path:
     return data_dir / "state.json"
 
 
+def _anim_state_path(data_dir: Path) -> Path:
+    return data_dir / "state_anim.json"
+
+
 def _load_pending(data_dir: Path) -> Dict[str, Any]:
     return read_json(_pending_path(data_dir)) or {"items": []}
 
 
 def _chat_log_path(data_dir: Path) -> Path:
     return data_dir / "logs" / "chat.jsonl"
+
+
+def _anim_select_log_path(data_dir: Path) -> Path:
+    return data_dir / "logs" / "anim_select.jsonl"
+
+
+def _clip_text(s: str, limit: int = 400) -> str:
+    try:
+        t = str(s or "")
+    except Exception:
+        return ""
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    if len(t) <= limit:
+        return t
+    return t[: max(0, limit - 3)] + "..."
+
+
+def _append_anim_select_log(
+    *,
+    data_dir: Path,
+    ok: bool,
+    playback_id: str,
+    cfg: "AnimationLLMConfig",
+    req: "AnimSelectIn",
+    selection: "AnimationSelectOut",
+    error: Optional[str] = None,
+) -> None:
+    try:
+        writer = JsonlWriter(_anim_select_log_path(data_dir))
+        writer.append(
+            {
+                "ts": utc_iso(),
+                "ok": bool(ok),
+                "playback_id": str(playback_id or ""),
+                "in": {
+                    "user_text": _clip_text(req.user_text, 600),
+                    "overlay_text": _clip_text(req.overlay_text, 600),
+                    "speech_text": _clip_text(req.speech_text, 600),
+                },
+                "config": {
+                    "enabled": bool(cfg.enabled),
+                    "provider": str(cfg.provider or ""),
+                    "model": str(cfg.model or ""),
+                    "temperature": float(cfg.temperature),
+                    "max_output_tokens": int(cfg.max_output_tokens),
+                    "json_strict": bool(cfg.json_strict),
+                    # system_prompt can be large; store only a short prefix for diagnostics
+                    "system_prompt_prefix": _clip_text(getattr(cfg, "system_prompt", ""), 200),
+                },
+                "selection": selection.model_dump(mode="json"),
+                "error": _clip_text(error or "", 400),
+            }
+        )
+    except Exception:
+        pass
 
 
 def _append_chat_log(*, data_dir: Path, run_id: str, role: str, text: str, source: str, meta: Optional[Dict[str, Any]] = None) -> None:
@@ -844,6 +904,10 @@ def _load_state(data_dir: Path) -> Dict[str, Any]:
 
 def _save_state(data_dir: Path, state: Dict[str, Any]) -> None:
     write_json(_state_path(data_dir), state)
+
+
+def _save_anim_state(data_dir: Path, state: Dict[str, Any]) -> None:
+    write_json(_anim_state_path(data_dir), state)
 
 
 def _bump_live2d_seq(state: Dict[str, Any], *, tags: List[str], last_tag: Optional[str]) -> Dict[str, Any]:
@@ -1187,6 +1251,25 @@ class WebSubmitIn(BaseModel):
     vlm_summary: Optional[str] = None
     llm_provider: Optional[str] = None
     tts_provider: Optional[str] = None
+    animation_llm: Optional[Dict[str, Any]] = None
+
+
+class AnimationLLMConfigIn(BaseModel):
+    enabled: bool = False
+    provider: str = "gemini"
+    model: str = ""
+    temperature: float = 0.2
+    max_output_tokens: int = 128
+    system_prompt: str = ""
+    json_strict: bool = True
+
+
+class AnimSelectIn(BaseModel):
+    user_text: str = ""
+    overlay_text: str = ""
+    speech_text: str = ""
+    playback_id: str = ""
+    config: Optional[AnimationLLMConfigIn] = None
 
 
 class ProviderUpdateIn(BaseModel):
@@ -1210,6 +1293,86 @@ app.add_middleware(
 )
 
 
+@app.post("/anim/select")
+def anim_select(req: AnimSelectIn) -> JSONResponse:
+    """Select (expression, motion) during TTS playback.
+
+    Called by the web Stage while audio is playing, so it must be fast and
+    always return a safe JSON shape.
+    """
+    settings = load_settings()
+
+    cfg_in = req.config
+    cfg = AnimationLLMConfig(
+        enabled=bool(cfg_in.enabled) if cfg_in is not None else bool(settings.anim_llm_enabled),
+        provider=str(cfg_in.provider) if cfg_in is not None else str(settings.anim_llm_provider),
+        model=(
+            str(cfg_in.model).strip()
+            if cfg_in is not None and str(cfg_in.model).strip()
+            else str(settings.anim_llm_model)
+        ),
+        temperature=float(cfg_in.temperature) if cfg_in is not None else float(settings.anim_llm_temperature),
+        max_output_tokens=int(cfg_in.max_output_tokens) if cfg_in is not None else int(settings.anim_llm_max_output_tokens),
+        system_prompt=str(cfg_in.system_prompt) if cfg_in is not None else str(settings.anim_llm_system_prompt),
+        json_strict=bool(cfg_in.json_strict) if cfg_in is not None else bool(settings.anim_llm_json_strict),
+    )
+
+    def _best_effort_write_last(selection: AnimationSelectOut, ok: bool, error: Optional[str] = None) -> None:
+        try:
+            _save_anim_state(
+                settings.data_dir,
+                {
+                    "ts": utc_iso(),
+                    "ok": bool(ok),
+                    "playback_id": str(req.playback_id or ""),
+                    "selection": selection.model_dump(mode="json"),
+                    "error": str(error or "")[:400],
+                    "config": {
+                        "enabled": bool(cfg.enabled),
+                        "provider": str(cfg.provider or ""),
+                        "model": str(cfg.model or ""),
+                        "temperature": float(cfg.temperature),
+                        "max_output_tokens": int(cfg.max_output_tokens),
+                        "json_strict": bool(cfg.json_strict),
+                    },
+                },
+            )
+        except Exception:
+            pass
+
+        _append_anim_select_log(
+            data_dir=settings.data_dir,
+            ok=bool(ok),
+            playback_id=str(req.playback_id or ""),
+            cfg=cfg,
+            req=req,
+            selection=selection,
+            error=error,
+        )
+
+    try:
+        out: AnimationSelectOut = select_animation(
+            api_key=settings.gemini_api_key,
+            config=cfg,
+            user_text=req.user_text,
+            overlay_text=req.overlay_text,
+            speech_text=req.speech_text,
+        )
+        _best_effort_write_last(out, True, None)
+        return JSONResponse({"ok": True, "playback_id": req.playback_id, "selection": out.model_dump(mode="json")})
+    except Exception as e:
+        fb = AnimationSelectOut(expression="", motion="", reset_after_tts=True, reason=f"server_error:{type(e).__name__}")
+        _best_effort_write_last(fb, False, f"{type(e).__name__}: {e}")
+        return JSONResponse(
+            {
+                "ok": False,
+                "playback_id": req.playback_id,
+                "selection": fb.model_dump(mode="json"),
+                "error": f"{type(e).__name__}: {e}",
+            }
+        )
+
+
 @app.on_event("startup")
 def _startup() -> None:
     settings = load_settings()
@@ -1217,6 +1380,7 @@ def _startup() -> None:
     (settings.data_dir / "audio").mkdir(parents=True, exist_ok=True)
     (settings.data_dir / "manager").mkdir(parents=True, exist_ok=True)
     (settings.data_dir / "obs").mkdir(parents=True, exist_ok=True)
+    (settings.data_dir / "logs").mkdir(parents=True, exist_ok=True)
     try:
         appcfg = _load_app_yaml(Path("config/stream_studio/app.yaml"))
         _purge_legacy_long_term_docs(settings=settings, appcfg=appcfg)
@@ -1444,6 +1608,26 @@ def _normalize_console_settings_payload(payload: Dict[str, Any]) -> Dict[str, An
             vlm["max_output_tokens"] = _parse_int(vlm_in.get("max_output_tokens"))
         if vlm:
             out["vlm"] = vlm
+
+    anim_in = payload.get("animation_llm")
+    if isinstance(anim_in, dict):
+        anim: Dict[str, Any] = {}
+        if "enabled" in anim_in:
+            anim["enabled"] = _parse_bool_flag(anim_in.get("enabled"), default=False)
+        if "provider" in anim_in:
+            anim["provider"] = str(anim_in.get("provider") or "").strip().lower()
+        if "model" in anim_in:
+            anim["model"] = str(anim_in.get("model") or "")
+        if "temperature" in anim_in:
+            anim["temperature"] = _parse_float(anim_in.get("temperature"))
+        if "max_output_tokens" in anim_in:
+            anim["max_output_tokens"] = _parse_int(anim_in.get("max_output_tokens"))
+        if "system_prompt" in anim_in:
+            anim["system_prompt"] = str(anim_in.get("system_prompt") or "")
+        if "json_strict" in anim_in:
+            anim["json_strict"] = _parse_bool_flag(anim_in.get("json_strict"), default=True)
+        if anim:
+            out["animation_llm"] = anim
 
     toggles_in = payload.get("toggles")
     if isinstance(toggles_in, dict):
@@ -1678,6 +1862,47 @@ def config_load_all() -> Dict[str, Any]:
     if vlm_max_tokens is None:
         vlm_max_tokens = 256
 
+    anim_raw = raw.get("animation_llm") if isinstance(raw, dict) else {}
+    anim_enabled = settings.anim_llm_enabled
+    if isinstance(anim_raw, dict) and "enabled" in anim_raw:
+        anim_enabled = _parse_bool_flag(anim_raw.get("enabled"), default=settings.anim_llm_enabled)
+
+    anim_provider = (
+        str(anim_raw.get("provider") or "").strip().lower()
+        if isinstance(anim_raw, dict) and "provider" in anim_raw
+        else str(settings.anim_llm_provider or "gemini").strip().lower()
+    )
+    anim_provider = anim_provider or "gemini"
+
+    anim_model = (
+        str(anim_raw.get("model") or "").strip()
+        if isinstance(anim_raw, dict) and "model" in anim_raw
+        else str(settings.anim_llm_model or "").strip()
+    )
+    anim_model = anim_model or str(settings.anim_llm_model or "gemini-2.0-flash-lite").strip() or "gemini-2.0-flash-lite"
+
+    anim_temp = None
+    if isinstance(anim_raw, dict) and "temperature" in anim_raw:
+        anim_temp = _parse_float(anim_raw.get("temperature"))
+    if anim_temp is None:
+        anim_temp = float(settings.anim_llm_temperature)
+
+    anim_max_tokens = None
+    if isinstance(anim_raw, dict) and "max_output_tokens" in anim_raw:
+        anim_max_tokens = _parse_int(anim_raw.get("max_output_tokens"))
+    if anim_max_tokens is None:
+        anim_max_tokens = int(settings.anim_llm_max_output_tokens)
+
+    anim_sys = (
+        str(anim_raw.get("system_prompt") or "")
+        if isinstance(anim_raw, dict) and "system_prompt" in anim_raw
+        else str(settings.anim_llm_system_prompt or "")
+    )
+
+    anim_json_strict = settings.anim_llm_json_strict
+    if isinstance(anim_raw, dict) and "json_strict" in anim_raw:
+        anim_json_strict = _parse_bool_flag(anim_raw.get("json_strict"), default=settings.anim_llm_json_strict)
+
     stt_raw = raw.get("stt") if isinstance(raw, dict) else {}
     stt_model = (
         str(stt_raw.get("model") or "").strip()
@@ -1784,6 +2009,15 @@ def config_load_all() -> Dict[str, Any]:
                 "model_list": vlm_list,
                 "temperature": vlm_temp,
                 "max_output_tokens": vlm_max_tokens,
+            },
+            "animation_llm": {
+                "enabled": bool(anim_enabled),
+                "provider": anim_provider,
+                "model": anim_model,
+                "temperature": anim_temp,
+                "max_output_tokens": anim_max_tokens,
+                "system_prompt": anim_sys,
+                "json_strict": bool(anim_json_strict),
             },
             "stt": {
                 "model": stt_model,
@@ -2071,6 +2305,12 @@ def live2d_hotkeys() -> Dict[str, Any]:
 def get_state() -> Dict[str, Any]:
     settings = load_settings()
     st = read_json(_state_path(settings.data_dir)) or {}
+    try:
+        anim_st = read_json(_anim_state_path(settings.data_dir)) or {}
+        if isinstance(anim_st, dict) and anim_st:
+            st["anim_select_last"] = anim_st
+    except Exception:
+        pass
     return {"ok": True, "state": st}
 
 

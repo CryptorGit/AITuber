@@ -8,12 +8,30 @@ import { extractRequestFeatures } from './learn/obs_features';
 import { readSaveConfig } from './learn/save_config';
 import { collectReplayMeta } from './meta';
 import { listVgcFormatCandidates, resolveFormatIdOrSuggest } from './showdown/format_resolver';
-import { generatePackedTeam, loadTeamGenData, select4FromTeam, tryGeneratePackedTeamFromPool } from './team/teamgen';
+import { generatePackedTeam, loadTeamGenData, tryGeneratePackedTeamFromPool } from './team/teamgen';
 import { runOneBattle, type TraceDecisionEvent } from './showdown/sim_runner';
+import { LeagueManager } from './ppo/league_manager';
+import { PpoBattleCoordinator } from './ppo/ppo_battle_coordinator';
+import { PpoClient } from './ppo/ppo_client';
+import { RolloutCollector } from './ppo/rollout_collector';
+import { PpoRunStats } from './ppo/ppo_observability';
 import * as TeamsMod from '../../../../../tools/pokemon-showdown/pokemon-showdown/sim/teams';
 
 const Teams: any = (TeamsMod as any).default?.Teams ?? (TeamsMod as any).Teams ?? (TeamsMod as any).default;
 const DEBUG = process.env.VGC_DEMO_DEBUG === '1';
+
+function isPpoPolicy(p: string): boolean {
+  const s = String(p ?? '').trim();
+  return s === 'ppo' || s === 'learner' || s === 'baseline' || s === 'league' || s.startsWith('snapshot:');
+}
+
+function toPpoPolicyId(p: string): string {
+  const s = String(p ?? '').trim();
+  if (s === 'ppo') return 'learner';
+  if (s === 'league') return 'league';
+  if (s === 'learner' || s === 'baseline' || s.startsWith('snapshot:')) return s;
+  return 'learner';
+}
 
 function repoRoot(): string {
   const here = fileURLToPath(new URL('.', import.meta.url));
@@ -113,6 +131,33 @@ function shuffleInPlace<T>(arr: T[], rng: () => number) {
   }
 }
 
+function clampInt(n: number, lo: number, hi: number): number {
+  if (!Number.isFinite(n)) return lo;
+  return Math.max(lo, Math.min(hi, Math.trunc(n)));
+}
+
+function buildTeamPreviewChoice(opts: {
+  teamSize: number;
+  pickN: number;
+  selectIdx0: number[];
+}): string {
+  const teamSize = clampInt(opts.teamSize, 1, 24);
+  const pickN = clampInt(opts.pickN, 1, teamSize);
+
+  // If we bring the whole team (6v6 singles, etc), keep a stable order.
+  if (pickN >= teamSize) {
+    const order = Array.from({ length: teamSize }, (_, i) => i + 1);
+    return `team ${order.join('')}`;
+  }
+
+  const digits = opts.selectIdx0
+    .slice(0, pickN)
+    .map((i) => clampInt(Number(i), 0, teamSize - 1) + 1)
+    .join('');
+
+  return `team ${digits}`;
+}
+
 type BattleRow = Record<string, unknown>;
 
 function readJsonl(filePath: string): BattleRow[] {
@@ -198,6 +243,14 @@ async function main() {
   const pythonUrl = String(args['python_url'] ?? '');
   const seed = Number(args['seed'] ?? '0');
 
+  // PPO state (optional).
+  const ppoRolloutLen = clampInt(Number(process.env.PPO_ROLLOUT_LEN ?? '256'), 8, 4096);
+  const ppoEnabled = isPpoPolicy(p1Policy) || isPpoPolicy(p2Policy);
+  const ppoClient = ppoEnabled ? new PpoClient(pythonUrl) : null;
+  const ppoStats = ppoClient ? new PpoRunStats() : null;
+  const ppoCollector = ppoClient ? new RolloutCollector(ppoClient, ppoRolloutLen, ppoStats ?? undefined) : null;
+  const ppoLeague = ppoClient ? new LeagueManager(ppoClient) : null;
+
   const resolved = resolveFormatIdOrSuggest(format);
   if (!resolved.ok) {
     console.error(resolved.error);
@@ -250,7 +303,7 @@ async function main() {
 
   const data = loadTeamGenData();
 
-  let warnedPoolFallback = false;
+  // Pool-only: do not fall back to species_pool/sets_min.
 
   // Team cycling: run N battles with the same team6, then resample.
   // Default to 10 so a 21-battle demo produces 10 + 10 + 1 battles across 3 teams.
@@ -306,13 +359,12 @@ async function main() {
         const pool1 = tryGeneratePackedTeamFromPool(batchSeed * 1009 + 1, { mode: 'random' });
         const pool2 = tryGeneratePackedTeamFromPool(batchSeed * 1009 + 2, { mode: 'random' });
         if (!pool1 || !pool2) {
-          if (!warnedPoolFallback) {
-            warnedPoolFallback = true;
-            console.warn('[vgc-demo] pool.json not usable (need >= 6 valid entries); falling back to data/species_pool.json + data/sets_min.json');
-          }
+          throw new Error(
+            'pool.json not usable (need >= 6 valid entries). Please populate config/pokemon-showdown/vgc-demo/pool.json'
+          );
         }
-        const t1 = pool1 ?? generatePackedTeam(data, batchSeed * 1009 + 1);
-        const t2 = pool2 ?? generatePackedTeam(data, batchSeed * 1009 + 2);
+        const t1 = pool1;
+        const t2 = pool2;
 
         team6_p1 = t1.team;
         team6_p2 = t2.team;
@@ -325,28 +377,69 @@ async function main() {
         team2Id = team2Hash.slice(0, 12);
       }
 
-      // Team preview (demo): call /select4 if python URL is provided; else take first 4.
-      phase = 'select4';
+      // Team preview selection (demo): choose pickN mons from teamSize.
+      // - VGC: 6 shown -> pick 4
+      // - BSS singles: 6 shown -> pick 3
+      phase = 'teamPreview';
+      const teamSize = Array.isArray(team6_p1) ? team6_p1.length : 6;
+      const defaultPickN = Number((data as any)?.rules?.battle_size ?? 4);
+      const pickN = clampInt(Number(process.env.PS_PICK_N ?? defaultPickN), 1, teamSize);
+
       const rng1 = lcg(battleSeed * 1009 + 11);
       const rng2 = lcg(battleSeed * 1009 + 22);
-      select4_p1 = sampleUniqueIndices(6, 4, rng1);
-      select4_p2 = sampleUniqueIndices(6, 4, rng2);
-      // Randomize lead order (first two are leads).
-      shuffleInPlace(select4_p1, rng1);
-      shuffleInPlace(select4_p2, rng2);
 
-      const team4_p1_raw = select4FromTeam(team6_p1, select4_p1);
-      const team4_p2_raw = select4FromTeam(team6_p2, select4_p2);
+      if (pickN >= teamSize) {
+        select4_p1 = Array.from({ length: teamSize }, (_, i) => i);
+        select4_p2 = Array.from({ length: teamSize }, (_, i) => i);
+      } else {
+        select4_p1 = sampleUniqueIndices(teamSize, pickN, rng1);
+        select4_p2 = sampleUniqueIndices(teamSize, pickN, rng2);
+        // Randomize order (the sim interprets order as lead preference where applicable).
+        shuffleInPlace(select4_p1, rng1);
+        shuffleInPlace(select4_p2, rng2);
+      }
 
-      const team4_p1 = team4_p1_raw;
-      const team4_p2 = team4_p2_raw;
-
-      const packed1 = Teams.pack(team4_p1);
-      const packed2 = Teams.pack(team4_p2);
+      const packed1 = team6_packed_p1;
+      const packed2 = team6_packed_p2;
+      const teamPreviewChoiceP1 = buildTeamPreviewChoice({ teamSize, pickN, selectIdx0: select4_p1 });
+      const teamPreviewChoiceP2 = buildTeamPreviewChoice({ teamSize, pickN, selectIdx0: select4_p2 });
 
       const isLocal = (p: string) => p === 'battle_policy' || p.startsWith('local:');
-      const policyMode1 = isLocal(p1Policy) ? 'local' : pythonUrl && p1Policy !== 'fallback' ? 'python' : 'fallback';
-      const policyMode2 = isLocal(p2Policy) ? 'local' : pythonUrl && p2Policy !== 'fallback' ? 'python' : 'fallback';
+      const policyMode1 = isLocal(p1Policy)
+        ? 'local'
+        : ppoEnabled && isPpoPolicy(p1Policy)
+          ? 'ppo'
+          : pythonUrl && p1Policy !== 'fallback'
+            ? 'python'
+            : 'fallback';
+      const policyMode2 = isLocal(p2Policy)
+        ? 'local'
+        : ppoEnabled && isPpoPolicy(p2Policy)
+          ? 'ppo'
+          : pythonUrl && p2Policy !== 'fallback'
+            ? 'python'
+            : 'fallback';
+
+      let ppoCoordinator: PpoBattleCoordinator | undefined;
+      if (ppoEnabled && ppoClient && ppoCollector) {
+        await ppoLeague?.refreshSnapshots();
+        const p1PolicyId = toPpoPolicyId(p1Policy);
+        let p2PolicyId = toPpoPolicyId(p2Policy);
+        if (p2PolicyId === 'league' && ppoLeague) {
+          const sample = ppoLeague.sampleOpponent(battleSeed ^ 0x9e3779b9);
+          p2PolicyId = sample.policy_id;
+        }
+        ppoCoordinator = new PpoBattleCoordinator(
+          ppoClient,
+          ppoCollector,
+          {
+            p1_policy_id: p1PolicyId,
+            p2_policy_id: p2PolicyId,
+          },
+          ppoStats ?? undefined,
+          { battle_id: battleId }
+        );
+      }
 
       phase = 'battle';
       const result = await runOneBattle({
@@ -356,14 +449,17 @@ async function main() {
           name: 'p1',
           team: packed1,
           policyMode: policyMode1 as any,
-          python: pythonUrl ? { baseUrl: pythonUrl, policy: (p1Policy as any) } : undefined,
+          python: policyMode1 === 'python' ? { baseUrl: pythonUrl, policy: (p1Policy as any) } : undefined,
+          teamPreviewChoice: teamPreviewChoiceP1,
         },
         p2: {
           name: 'p2',
           team: packed2,
           policyMode: policyMode2 as any,
-          python: pythonUrl ? { baseUrl: pythonUrl, policy: (p2Policy as any) } : undefined,
+          python: policyMode2 === 'python' ? { baseUrl: pythonUrl, policy: (p2Policy as any) } : undefined,
+          teamPreviewChoice: teamPreviewChoiceP2,
         },
+        ppo: ppoCoordinator,
         debug: DEBUG ? { logPath: debugPath, runId, battleId } : undefined,
         trace: saveReplayThis || saveTrainThis ? trace : undefined,
       });
@@ -398,6 +494,8 @@ async function main() {
         select4_p1,
         select4_p2,
       });
+
+      ppoStats?.onBattleFinished();
 
       if (saveReplayThis) {
         const meta = collectReplayMeta({
@@ -497,13 +595,13 @@ async function main() {
         winner: 'error',
         turns: 0,
         p1: {
-          policy: pythonUrl && p1Policy !== 'fallback' ? `python:${p1Policy}` : 'fallback',
+          policy: ppoEnabled && isPpoPolicy(p1Policy) ? 'ppo' : pythonUrl && p1Policy !== 'fallback' ? `python:${p1Policy}` : 'fallback',
           team_id: team1Id || undefined,
           team_hash: team1Hash || undefined,
           select4: select4_p1.length ? select4_p1 : undefined,
         },
         p2: {
-          policy: pythonUrl && p2Policy !== 'fallback' ? `python:${p2Policy}` : 'fallback',
+          policy: ppoEnabled && isPpoPolicy(p2Policy) ? 'ppo' : pythonUrl && p2Policy !== 'fallback' ? `python:${p2Policy}` : 'fallback',
           team_id: team2Id || undefined,
           team_hash: team2Hash || undefined,
           select4: select4_p2.length ? select4_p2 : undefined,

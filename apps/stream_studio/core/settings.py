@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AITUBER_", extra="ignore")
 
     # Paths
-    data_dir: Path = Field(default=Path("data"))
+    data_dir: Path = Field(default=Path("data/stream_studio"))
     obs_overlay_path: Path = Field(default=Path("data/stream_studio/obs/overlay.txt"))
 
     # Server
@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="gemini")
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-2.0-flash-lite")
+
+    # Animation selector LLM (separate from reply LLM)
+    anim_llm_enabled: bool = Field(default=False)
+    anim_llm_provider: str = Field(default="gemini")
+    anim_llm_model: str = Field(default="gemini-2.0-flash-lite")
+    anim_llm_temperature: float = Field(default=0.2)
+    anim_llm_max_output_tokens: int = Field(default=128)
+    anim_llm_system_prompt: str = Field(default="")
+    anim_llm_json_strict: bool = Field(default=True)
 
     # STT (hard-locked to local faster-whisper large-v3-turbo)
     stt_enabled: bool = Field(default=True)

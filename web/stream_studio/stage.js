@@ -15,6 +15,12 @@
     }
   })();
 
+  // Debug state for Animation Selector LLM
+  let lastAnimSelectReq = null;
+  let lastAnimSelectResp = null;
+  let lastAnimSelectErr = null;
+  let lastAnimSelectAtMs = 0;
+
   let debugEl = null;
   function ensureDebugEl() {
     if (!DEBUG) return;
@@ -133,16 +139,31 @@
       const j = await safeJsonFetch(modelJsonUrl);
       const motions = j && j.FileReferences && j.FileReferences.Motions ? j.FileReferences.Motions : {};
       const map = new Map();
+      const groups = [];
+      let fallbackMotion = null;
+
+      // Prefer the unnamed group "" if it exists (often contains more expressive motions).
+      try {
+        const unnamed = motions && Object.prototype.hasOwnProperty.call(motions, '') ? motions[''] : null;
+        if (Array.isArray(unnamed) && unnamed.length) {
+          fallbackMotion = { group: '', index: 0 };
+        }
+      } catch {
+        // ignore
+      }
+
       for (const group of Object.keys(motions)) {
+        groups.push(String(group));
         const arr = motions[group] || [];
         for (let i = 0; i < arr.length; i += 1) {
           const file = arr[i] && arr[i].File ? normalizeRelPath(arr[i].File) : '';
           if (file) map.set(file, { group, index: i });
+          if (!fallbackMotion) fallbackMotion = { group, index: i };
         }
       }
-      return map;
+      return { map, groups, fallbackMotion };
     } catch {
-      return new Map();
+      return { map: new Map(), groups: [], fallbackMotion: null };
     }
   }
 
@@ -196,7 +217,10 @@
     stageLog('model lipsync ids', modelLipSyncIds);
 
     const hotkeys = await loadHotkeys();
-    const motionIndex = await buildMotionIndex(modelUrl);
+    const motionInfo = await buildMotionIndex(modelUrl);
+    const motionIndex = motionInfo && motionInfo.map ? motionInfo.map : new Map();
+    const motionGroups = motionInfo && Array.isArray(motionInfo.groups) ? motionInfo.groups : [];
+    const fallbackMotion = motionInfo && motionInfo.fallbackMotion ? motionInfo.fallbackMotion : null;
 
     // Cubism Core is required for cubism4.
     if (!window.Live2DCubismCore) {
@@ -892,6 +916,14 @@
                   mouthOpen: resolvedParamIds.mouthOpen,
                   vowelA: resolvedParamIds.vowelA,
                   blocked: !!audioBlockedHint,
+                  anim: {
+                    last_at_ms: lastAnimSelectAtMs ? Math.round(lastAnimSelectAtMs) : 0,
+                    last_req: lastAnimSelectReq,
+                    last_ok: lastAnimSelectResp ? !!lastAnimSelectResp.ok : null,
+                    last_playback_id: lastAnimSelectResp ? lastAnimSelectResp.playback_id : null,
+                    last_selection: lastAnimSelectResp ? lastAnimSelectResp.selection : null,
+                    last_error: lastAnimSelectErr,
+                  },
                 };
                 setDebugText(JSON.stringify(dbg, null, 2));
               }
@@ -1172,12 +1204,124 @@
       }
 
       // Fallback: treat the tag itself as a motion group name.
-      model.motion(key);
+      // If the group doesn't exist for this model, fall back to a safe known group.
+      try {
+        const groups = Array.isArray(motionGroups) ? motionGroups : [];
+        const hasGroup = groups.includes(key);
+        if (hasGroup) {
+          model.motion(key);
+          return;
+        }
+        if (groups.includes('Idle')) {
+          model.motion('Idle');
+          return;
+        }
+        if (fallbackMotion && fallbackMotion.group != null && fallbackMotion.index != null) {
+          model.motion(fallbackMotion.group, fallbackMotion.index);
+          return;
+        }
+        const first = groups.find((g) => String(g || '').trim());
+        if (first) {
+          model.motion(first);
+          return;
+        }
+        model.motion(key);
+      } catch {
+        // ignore
+      }
+    }
+
+    function getAnimLlmConfigFromLocalStorage() {
+      const coerceBool = (s, def) => {
+        const v = String(s || '').trim().toLowerCase();
+        if (!v) return def;
+        if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+        if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+        return def;
+      };
+      const coerceNum = (s, def) => {
+        const n = Number(String(s || '').trim());
+        return Number.isFinite(n) ? n : def;
+      };
+      const coerceInt = (s, def) => {
+        const n = parseInt(String(s || '').trim(), 10);
+        return Number.isFinite(n) ? n : def;
+      };
+      try {
+        return {
+          enabled: coerceBool(localStorage.getItem('aituber.anim_llm.enabled'), false),
+          provider: String(localStorage.getItem('aituber.anim_llm.provider') || 'gemini').trim().toLowerCase() || 'gemini',
+          model: String(localStorage.getItem('aituber.anim_llm.model') || '').trim(),
+          temperature: coerceNum(localStorage.getItem('aituber.anim_llm.temperature'), 0.2),
+          max_output_tokens: coerceInt(localStorage.getItem('aituber.anim_llm.max_output_tokens'), 128),
+          system_prompt: String(localStorage.getItem('aituber.anim_llm.system_prompt') || ''),
+          json_strict: coerceBool(localStorage.getItem('aituber.anim_llm.json_strict'), true),
+        };
+      } catch {
+        return {
+          enabled: false,
+          provider: 'gemini',
+          model: '',
+          temperature: 0.2,
+          max_output_tokens: 128,
+          system_prompt: '',
+          json_strict: true,
+        };
+      }
+    }
+
+    function isSafeAnimToken(s) {
+      const t = String(s || '').trim();
+      if (!t) return false;
+      if (t.length > 80) return false;
+      if (t.toLowerCase() === 'null' || t.toLowerCase() === 'none') return false;
+      return /^[A-Za-z0-9_\-./]+$/.test(t);
+    }
+
+    function applyAnimSelection(sel) {
+      if (!sel || typeof sel !== 'object') return;
+      const exp = isSafeAnimToken(sel.expression) ? String(sel.expression).trim() : '';
+      const mot = isSafeAnimToken(sel.motion) ? String(sel.motion).trim() : '';
+      if (exp) {
+        try {
+          if (model && typeof model.expression === 'function') {
+            model.expression(exp);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (mot) {
+        try {
+          playByTag(mot);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    function resetAnimToDefault() {
+      try {
+        if (model && typeof model.expression === 'function') {
+          model.expression('exp_01');
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        playByTag('IDLE_DEFAULT');
+      } catch {
+        // ignore
+      }
     }
 
     // Overlay polling
     let lastTtsVersion = null;
     let lastQueueVersion = null;
+    let ttsGroupId = 0;
+    let animStartedForGroupId = 0;
+    let lastOverlayText = '';
+    let activeAnim = { groupId: 0, reset_after_tts: true };
     const playedSegs = new Set();
     let playing = false;
     let queued = [];
@@ -1217,6 +1361,45 @@
         setMouthNeutral();
       }
       try {
+        if (animStartedForGroupId !== ttsGroupId) {
+          animStartedForGroupId = ttsGroupId;
+          const cfg = getAnimLlmConfigFromLocalStorage();
+          if (cfg && cfg.enabled) {
+            const playbackId = `tts_${ttsGroupId}`;
+            stageLog('anim/select request', { playback_id: playbackId });
+            lastAnimSelectReq = { playback_id: playbackId };
+            lastAnimSelectResp = null;
+            lastAnimSelectErr = null;
+            lastAnimSelectAtMs = performance.now();
+            void (async () => {
+              try {
+                const r = await fetch('/anim/select', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    user_text: String(it && it.text ? it.text : ''),
+                    overlay_text: lastOverlayText,
+                    speech_text: lastOverlayText,
+                    playback_id: playbackId,
+                    config: cfg,
+                  }),
+                });
+                const j = await r.json();
+                const sel = j && j.selection ? j.selection : null;
+                activeAnim = { groupId: ttsGroupId, reset_after_tts: sel ? Boolean(sel.reset_after_tts) : true };
+                stageLog('anim/select response', { ok: Boolean(j && j.ok), playback_id: j && j.playback_id, selection: sel });
+                lastAnimSelectResp = { ok: Boolean(j && j.ok), playback_id: j && j.playback_id, selection: sel };
+                lastAnimSelectErr = j && j.error ? String(j.error) : null;
+                lastAnimSelectAtMs = performance.now();
+                applyAnimSelection(sel);
+              } catch (e) {
+                stageLog('anim/select error', { error: e && e.message ? e.message : String(e) });
+                lastAnimSelectErr = e && e.message ? e.message : String(e);
+                lastAnimSelectAtMs = performance.now();
+              }
+            })();
+          }
+        }
         const onPlaying = () => {
           try {
             audioEl.removeEventListener('playing', onPlaying);
@@ -1281,6 +1464,14 @@
       currentLipSyncUrl = '';
       setMouthNeutral();
       ensurePlayback();
+
+       // Reset only when the whole queue has finished (avoid resetting between segments)
+       if (!playing && !pickNextSegment()) {
+         if (activeAnim && activeAnim.groupId === ttsGroupId && activeAnim.reset_after_tts) {
+           stageLog('anim/reset', { group_id: ttsGroupId });
+           resetAnimToDefault();
+         }
+       }
     });
 
     audioEl.addEventListener('error', () => {
@@ -1289,18 +1480,30 @@
       currentLipSyncUrl = '';
       setMouthNeutral();
       ensurePlayback();
+
+      if (!playing && !pickNextSegment()) {
+        if (activeAnim && activeAnim.groupId === ttsGroupId && activeAnim.reset_after_tts) {
+          stageLog('anim/reset', { group_id: ttsGroupId, reason: 'audio_error' });
+          resetAnimToDefault();
+        }
+      }
     });
     async function pollOverlay() {
       try {
         const j = await safeJsonFetch('/overlay_text');
-        if (overlayEl) overlayEl.textContent = j.speech_text || j.overlay_text || '';
+        lastOverlayText = j.speech_text || j.overlay_text || '';
+        if (overlayEl) overlayEl.textContent = lastOverlayText;
 
         // New segmented audio queue path
         const qv = j.tts_queue_version ?? null;
         const q = Array.isArray(j.tts_queue) ? j.tts_queue : [];
         // Always keep the latest queue; retry playback if we have items.
         queued = q;
-        if (qv && qv !== lastQueueVersion) lastQueueVersion = qv;
+        if (qv && qv !== lastQueueVersion) {
+          lastQueueVersion = qv;
+          ttsGroupId += 1;
+          animStartedForGroupId = 0;
+        }
         if (queued && queued.length) ensurePlayback();
 
         // Legacy single-file playback fallback
@@ -1309,6 +1512,8 @@
         const lipSyncPath = j.tts_lipsync_path || '';
         if ((!q || !q.length) && v && v !== lastTtsVersion) {
           lastTtsVersion = v;
+          ttsGroupId += 1;
+          animStartedForGroupId = 0;
           const t0 = performance.now();
           pendingLipSyncUrl = lipSyncPath ? String(lipSyncPath) : '';
           audioStartPerfMs = performance.now();
@@ -1329,6 +1534,45 @@
             setMouthNeutral();
           }
           try {
+            if (animStartedForGroupId !== ttsGroupId) {
+              animStartedForGroupId = ttsGroupId;
+              const cfg = getAnimLlmConfigFromLocalStorage();
+              if (cfg && cfg.enabled) {
+                const playbackId = `tts_${ttsGroupId}`;
+                stageLog('anim/select request', { playback_id: playbackId });
+                lastAnimSelectReq = { playback_id: playbackId };
+                lastAnimSelectResp = null;
+                lastAnimSelectErr = null;
+                lastAnimSelectAtMs = performance.now();
+                void (async () => {
+                  try {
+                    const r = await fetch('/anim/select', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        user_text: String(lastOverlayText || ''),
+                        overlay_text: String(lastOverlayText || ''),
+                        speech_text: String(lastOverlayText || ''),
+                        playback_id: playbackId,
+                        config: cfg,
+                      }),
+                    });
+                    const jj = await r.json();
+                    const sel = jj && jj.selection ? jj.selection : null;
+                    activeAnim = { groupId: ttsGroupId, reset_after_tts: sel ? Boolean(sel.reset_after_tts) : true };
+                    stageLog('anim/select response', { ok: Boolean(jj && jj.ok), playback_id: jj && jj.playback_id, selection: sel });
+                    lastAnimSelectResp = { ok: Boolean(jj && jj.ok), playback_id: jj && jj.playback_id, selection: sel };
+                    lastAnimSelectErr = jj && jj.error ? String(jj.error) : null;
+                    lastAnimSelectAtMs = performance.now();
+                    applyAnimSelection(sel);
+                  } catch (e) {
+                    stageLog('anim/select error', { error: e && e.message ? e.message : String(e) });
+                    lastAnimSelectErr = e && e.message ? e.message : String(e);
+                    lastAnimSelectAtMs = performance.now();
+                  }
+                })();
+              }
+            }
             const onPlaying = () => {
               try {
                 audioEl.removeEventListener('playing', onPlaying);

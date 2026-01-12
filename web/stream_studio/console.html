@@ -419,6 +419,48 @@
         <button id="vlmSave">VLM 設定を保存</button>
         <div class="muted" id="vlmPromptStatus" style="margin-top:8px"></div>
 
+        <h3 style="margin-top:12px">Animation Selector LLM</h3>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="animLlmEnabled" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">ONで TTS再生中に /anim/select を非同期呼び出し</div>
+        </div>
+
+        <label>Animation LLM system prompt</label>
+        <textarea id="animLlmSystemPrompt" placeholder="Animation selector 用 system prompt"></textarea>
+
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:240px; flex:1">
+            <label>Animation LLM model</label>
+            <input id="animLlmModel" placeholder="gemini-2.0-flash-lite" />
+          </div>
+          <div style="min-width:160px; flex:1">
+            <label>Animation LLM temperature</label>
+            <input id="animLlmTemp" type="number" step="0.1" min="0" max="2" />
+          </div>
+          <div style="min-width:200px; flex:1">
+            <label>Animation LLM max_output_tokens</label>
+            <input id="animLlmMaxTokens" type="number" step="1" min="32" max="1024" />
+          </div>
+        </div>
+
+        <label>Animation LLM provider</label>
+        <select id="animLlmProvider">
+          <option value="gemini">gemini</option>
+        </select>
+
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px">
+          <input id="animLlmJsonStrict" type="checkbox" style="width:auto; margin:0" />
+          <div class="muted">JSON strict (server will still best-effort extract)</div>
+        </div>
+
+        <button id="animLlmSave">Animation LLM 設定を保存</button>
+        <div class="muted" id="animLlmSaveStatus" style="margin-top:8px"></div>
+
+        <div style="display:flex; gap:8px; margin-top:8px">
+          <button id="animLlmTest" type="button" class="btn-inline">Test /anim/select</button>
+          <div class="muted" id="animLlmStatus" style="align-self:center"></div>
+        </div>
+
         <h3 style="margin-top:12px">TTS</h3>
         <label>TTS provider</label>
         <select id="ttsProvider">
@@ -435,6 +477,6 @@
       </div>
     </div>
 
-    <script src="console.js?v=20260107_4"></script>
+    <script src="console.js?v=20260112_1"></script>
   </body>
 </html>

@@ -8,9 +8,9 @@ import uvicorn
 
 
 def main(argv: list[str] | None = None) -> int:
-    # When launched as a script (python scripts/run_uvicorn.py), sys.path[0] becomes
-    # the scripts/ folder. Add repo root so `apps.*` imports resolve.
-    repo_root = Path(__file__).resolve().parents[1]
+    # When launched as a script, sys.path[0] becomes the script's folder.
+    # Add repo root so `apps.*` imports resolve.
+    repo_root = Path(__file__).resolve().parents[2]
     repo_root_str = str(repo_root)
     if repo_root_str not in sys.path:
         sys.path.insert(0, repo_root_str)

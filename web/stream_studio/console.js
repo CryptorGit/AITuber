@@ -101,7 +101,113 @@
     ttsVoiceAdd: document.getElementById('ttsVoiceAdd'),
     ttsVoiceAddBtn: document.getElementById('ttsVoiceAddBtn'),
     ttsVoiceRemoveBtn: document.getElementById('ttsVoiceRemoveBtn'),
+
+    // Animation selector LLM
+    animLlmEnabled: document.getElementById('animLlmEnabled'),
+    animLlmProvider: document.getElementById('animLlmProvider'),
+    animLlmModel: document.getElementById('animLlmModel'),
+    animLlmTemp: document.getElementById('animLlmTemp'),
+    animLlmMaxTokens: document.getElementById('animLlmMaxTokens'),
+    animLlmSystemPrompt: document.getElementById('animLlmSystemPrompt'),
+    animLlmJsonStrict: document.getElementById('animLlmJsonStrict'),
+    animLlmSave: document.getElementById('animLlmSave'),
+    animLlmSaveStatus: document.getElementById('animLlmSaveStatus'),
+    animLlmTest: document.getElementById('animLlmTest'),
+    animLlmStatus: document.getElementById('animLlmStatus'),
   };
+
+  function buildAnimLlmConfig() {
+    return {
+      enabled: Boolean(el.animLlmEnabled && el.animLlmEnabled.checked),
+      provider: String((el.animLlmProvider && el.animLlmProvider.value) || 'gemini').trim().toLowerCase() || 'gemini',
+      model: String((el.animLlmModel && el.animLlmModel.value) || '').trim(),
+      temperature: toNumber(el.animLlmTemp && el.animLlmTemp.value) ?? 0.2,
+      max_output_tokens: toInt(el.animLlmMaxTokens && el.animLlmMaxTokens.value) ?? 128,
+      system_prompt: String((el.animLlmSystemPrompt && el.animLlmSystemPrompt.value) || ''),
+      json_strict: Boolean(el.animLlmJsonStrict && el.animLlmJsonStrict.checked),
+    };
+  }
+
+  function persistAnimLlmToLocalStorage() {
+    try {
+      const cfg = buildAnimLlmConfig();
+      localStorage.setItem('aituber.anim_llm.enabled', cfg.enabled ? '1' : '0');
+      localStorage.setItem('aituber.anim_llm.provider', String(cfg.provider || 'gemini'));
+      localStorage.setItem('aituber.anim_llm.model', String(cfg.model || ''));
+      localStorage.setItem('aituber.anim_llm.temperature', String(cfg.temperature ?? 0.2));
+      localStorage.setItem('aituber.anim_llm.max_output_tokens', String(cfg.max_output_tokens ?? 128));
+      localStorage.setItem('aituber.anim_llm.system_prompt', String(cfg.system_prompt || ''));
+      localStorage.setItem('aituber.anim_llm.json_strict', cfg.json_strict ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadAnimLlmFromLocalStorageBestEffort() {
+    try {
+      const enabled = (localStorage.getItem('aituber.anim_llm.enabled') || '').trim();
+      const provider = (localStorage.getItem('aituber.anim_llm.provider') || '').trim();
+      const model = (localStorage.getItem('aituber.anim_llm.model') || '').trim();
+      const temp = (localStorage.getItem('aituber.anim_llm.temperature') || '').trim();
+      const maxTok = (localStorage.getItem('aituber.anim_llm.max_output_tokens') || '').trim();
+      const sys = (localStorage.getItem('aituber.anim_llm.system_prompt') || '').trim();
+      const strict = (localStorage.getItem('aituber.anim_llm.json_strict') || '').trim();
+
+      if (el.animLlmEnabled && enabled) el.animLlmEnabled.checked = enabled === '1' || enabled.toLowerCase() === 'true';
+      if (el.animLlmProvider && provider) el.animLlmProvider.value = provider.toLowerCase();
+      if (el.animLlmModel && model) el.animLlmModel.value = model;
+      if (el.animLlmTemp && temp) el.animLlmTemp.value = temp;
+      if (el.animLlmMaxTokens && maxTok) el.animLlmMaxTokens.value = maxTok;
+      if (el.animLlmSystemPrompt && sys) el.animLlmSystemPrompt.value = sys;
+      if (el.animLlmJsonStrict && strict) el.animLlmJsonStrict.checked = strict === '1' || strict.toLowerCase() === 'true';
+    } catch {
+      // ignore
+    }
+  }
+
+  async function testAnimLlm() {
+    if (!el.animLlmStatus) return;
+    setStatusEl(el.animLlmStatus, 'testing...');
+    try {
+      const cfg = buildAnimLlmConfig();
+      const sample = String((el.manualText && el.manualText.value) || '').trim() || 'テストです。';
+      const j = await jsonFetch('/anim/select', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_text: sample,
+          overlay_text: sample,
+          speech_text: sample,
+          playback_id: 'console_test',
+          config: cfg,
+        }),
+      });
+      try {
+        window.__aituber_last_anim_select_console = j;
+      } catch {
+        // ignore
+      }
+
+      const sel = j && j.selection ? j.selection : null;
+      if (sel) {
+        const exp = sel.expression || '';
+        const mot = sel.motion || '';
+        const reset = sel.reset_after_tts;
+        const reason = sel.reason || '';
+        const elapsed = sel.elapsed_ms != null ? sel.elapsed_ms : '';
+        const ok = Boolean(j && j.ok);
+        const err = (j && j.error) || '';
+        const prefix = ok ? 'ok' : 'failed';
+        setStatusEl(
+          el.animLlmStatus,
+          `${prefix}: exp=${exp} motion=${mot} reset=${reset} elapsed_ms=${elapsed} reason=${reason}${err ? ` error=${err}` : ''} (NOTE: Stageには適用されません。TTS再生中にStageが呼びます)`,
+        );
+      } else {
+        setStatusEl(el.animLlmStatus, `failed: ${(j && j.error) || 'unknown'}`);
+      }
+    } catch (e) {
+      setStatusEl(el.animLlmStatus, `error: ${e && e.message ? e.message : e}`);
+    }
+  }
 
   let mediaStream = null;
   let recorder = null;
@@ -500,10 +606,39 @@
     const runId = st.last_run_id || '';
     lastSeenRunId = runId;
     lastSeenTtsVersion = st.tts_version ?? null;
+
+    let animMeta = null;
+    try {
+      const last = st.anim_select_last || null;
+      const sel = last && last.selection ? last.selection : null;
+      if (sel && (sel.expression || sel.motion || sel.reason || sel.elapsed_ms != null)) {
+        const ok = last && last.ok === false ? 'ANIM_ERR' : 'ANIM_OK';
+        const exp = sel.expression || '';
+        const mot = sel.motion || '';
+        const reason = sel.reason || '';
+        const elapsed = sel.elapsed_ms != null ? String(sel.elapsed_ms) + 'ms' : '';
+        const pid = last && last.playback_id ? String(last.playback_id) : '';
+        const ts = last && last.ts ? String(last.ts) : '';
+        animMeta = [
+          ok,
+          exp ? `exp=${exp}` : null,
+          mot ? `motion=${mot}` : null,
+          reason ? `reason=${reason}` : null,
+          elapsed ? `elapsed=${elapsed}` : null,
+          pid ? `playback_id=${pid}` : null,
+          ts ? `ts=${ts}` : null,
+        ]
+          .filter(Boolean)
+          .join(' ');
+      }
+    } catch {
+      // ignore
+    }
     const meta = [
       runId ? `run_id=${runId}` : null,
       provider ? `tts=${provider}` : null,
       ttsErr ? `tts_error=${ttsErr}` : null,
+      animMeta,
     ]
       .filter(Boolean)
       .join(' / ');
@@ -822,6 +957,7 @@
           vlm_summary: vlmSummary || null,
           llm_provider: llmProvider,
           tts_provider: ttsProvider,
+          animation_llm: buildAnimLlmConfig(),
         }),
       });
 
@@ -1185,6 +1321,7 @@
     const ttsProvider = el.ttsProvider ? String(el.ttsProvider.value || '').trim().toLowerCase() : '';
     const ttsVoice = String((el.ttsVoice && el.ttsVoice.value) || '').trim();
     const providers = (currentSettings && currentSettings.providers) || {};
+    const anim = buildAnimLlmConfig();
 
     // Preserve settings for fields whose inputs are not rendered.
     // This prevents hidden defaults from unintentionally overwriting server config.
@@ -1256,6 +1393,7 @@
         voice: ttsVoice,
         voice_list: modelLists.tts || [],
       },
+      animation_llm: anim,
       toggles: {
         stt: Boolean(el.sttEnabled && el.sttEnabled.checked),
         vlm: Boolean(el.vlmEnabled && el.vlmEnabled.checked),
@@ -1269,9 +1407,11 @@
     };
   }
 
-  async function saveAllSettings() {
-    if (!el.saveAllStatus) return;
-    setStatusEl(el.saveAllStatus, 'saving...');
+  async function saveAllSettings(statusElOverride) {
+    const primaryStatusEl = statusElOverride || el.saveAllStatus;
+    if (!primaryStatusEl && !el.saveAllStatus) return;
+    if (primaryStatusEl) setStatusEl(primaryStatusEl, 'saving...');
+    if (el.saveAllStatus && el.saveAllStatus !== primaryStatusEl) setStatusEl(el.saveAllStatus, 'saving...');
     try {
       const payload = buildSettingsPayload();
       const j = await jsonFetch('/config/save_all', {
@@ -1280,12 +1420,18 @@
       });
       if (j && j.ok) {
         currentSettings = payload;
-        setStatusEl(el.saveAllStatus, 'saved');
+        persistAnimLlmToLocalStorage();
+        if (primaryStatusEl) setStatusEl(primaryStatusEl, 'saved');
+        if (el.saveAllStatus && el.saveAllStatus !== primaryStatusEl) setStatusEl(el.saveAllStatus, 'saved');
       } else {
-        setStatusEl(el.saveAllStatus, `save failed: ${(j && j.error) || 'unknown'}`);
+        const msg = `save failed: ${(j && j.error) || 'unknown'}`;
+        if (primaryStatusEl) setStatusEl(primaryStatusEl, msg);
+        if (el.saveAllStatus && el.saveAllStatus !== primaryStatusEl) setStatusEl(el.saveAllStatus, msg);
       }
     } catch (e) {
-      setStatusEl(el.saveAllStatus, `save error: ${e && e.message ? e.message : e}`);
+      const msg = `save error: ${e && e.message ? e.message : e}`;
+      if (primaryStatusEl) setStatusEl(primaryStatusEl, msg);
+      if (el.saveAllStatus && el.saveAllStatus !== primaryStatusEl) setStatusEl(el.saveAllStatus, msg);
     }
   }
 
@@ -1304,6 +1450,18 @@
     setModelList('vlm', vlm.model_list || [], String(vlm.model || ''));
     if (el.vlmTemp && vlm.temperature != null) el.vlmTemp.value = String(vlm.temperature);
     if (el.vlmMaxTokens && vlm.max_output_tokens != null) el.vlmMaxTokens.value = String(vlm.max_output_tokens);
+
+    const anim = s.animation_llm || {};
+    if (el.animLlmEnabled) el.animLlmEnabled.checked = Boolean(anim.enabled);
+    if (el.animLlmProvider) el.animLlmProvider.value = String(anim.provider || 'gemini').trim().toLowerCase() || 'gemini';
+    if (el.animLlmModel) el.animLlmModel.value = String(anim.model || '');
+    if (el.animLlmTemp && anim.temperature != null) el.animLlmTemp.value = String(anim.temperature);
+    if (el.animLlmMaxTokens && anim.max_output_tokens != null) el.animLlmMaxTokens.value = String(anim.max_output_tokens);
+    if (el.animLlmSystemPrompt) el.animLlmSystemPrompt.value = String(anim.system_prompt || '');
+    if (el.animLlmJsonStrict) el.animLlmJsonStrict.checked = anim.json_strict != null ? Boolean(anim.json_strict) : true;
+
+    // Keep stage-compatible localStorage keys in sync
+    persistAnimLlmToLocalStorage();
 
     const stt = s.stt || {};
     const providers = s.providers || {};
@@ -1692,17 +1850,29 @@
 
     if (el.saveAllSettings) {
       el.saveAllSettings.onclick = async () => {
-        await saveAllSettings();
+        await saveAllSettings(el.saveAllStatus);
       };
     }
     if (el.llmSave) {
       el.llmSave.onclick = async () => {
-        await saveAllSettings();
+        await saveAllSettings(el.llmStatus || el.saveAllStatus);
       };
     }
     if (el.vlmSave) {
       el.vlmSave.onclick = async () => {
-        await saveAllSettings();
+        await saveAllSettings(el.vlmPromptStatus || el.saveAllStatus);
+      };
+    }
+
+    if (el.animLlmSave) {
+      el.animLlmSave.onclick = async () => {
+        await saveAllSettings(el.animLlmSaveStatus || el.saveAllStatus);
+      };
+    }
+
+    if (el.animLlmTest) {
+      el.animLlmTest.onclick = async () => {
+        await testAnimLlm();
       };
     }
     if (el.ragReload) {

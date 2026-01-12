@@ -54,6 +54,18 @@ OBS の Browser Source として `http://127.0.0.1:8000/stage` を指定する�
 Invoke-RestMethod http://127.0.0.1:8000/tts/health
 ```
 
+## 1.3) Animation Selector LLM（TTS中に表情/モーション選択）
+
+`/console` の "Animation Selector LLM" をONにすると、`/stage` が音声再生開始と同時に `POST /anim/select` を非同期で呼び出します。
+
+- 目的: 返信生成LLMとは別に、TTS再生中に Live2D の `expression` と `motion` を選ぶ
+- 終了: `tts_queue` の最後の音声が終わったタイミングで、`reset_after_tts=true` の場合 `exp_01` と `IDLE_DEFAULT` に復帰
+
+簡易テスト:
+
+- `/console` で `Test /anim/select` を押す（APIキー未設定の場合は安全なフォールバックJSON）
+- `/stage` のブラウザDevTools console に `anim/select request/response` と `anim/reset` ログが出る
+
 ## 2) サーバ確認
 
 ```powershell

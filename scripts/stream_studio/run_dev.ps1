@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $repoRoot
 
 if (-not (Test-Path ".venv")) {
@@ -20,4 +20,4 @@ if (-not (Test-Path ".env")) {
 $env:AITUBER_ENV_FILE = ".env/.env.main"
 
 Write-Host "[run_dev] Starting server" -ForegroundColor Cyan
-.\scripts\run_server.ps1
+.\scripts\stream_studio\run_server.ps1

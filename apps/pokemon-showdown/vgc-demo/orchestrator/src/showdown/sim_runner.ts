@@ -3,6 +3,7 @@ import type { ChoiceRequest } from '../../../../../../tools/pokemon-showdown/pok
 
 import { appendJsonl } from '../io/jsonl';
 import { chooseLocal, type LocalPolicyDebug } from '../ai/battle_policy';
+import type { PpoBattleCoordinator } from '../ppo/ppo_battle_coordinator';
 
 const DEBUG = process.env.VGC_DEMO_DEBUG === '1';
 
@@ -62,7 +63,7 @@ export type BattleResult = {
   error?: string;
 };
 
-type PolicyMode = 'fallback' | 'python' | 'local';
+type PolicyMode = 'fallback' | 'python' | 'local' | 'ppo';
 
 type PythonClient = {
   baseUrl: string;
@@ -77,7 +78,7 @@ export type TraceDecisionEvent = {
   legal: any;
   choice_raw: string;
   choice_norm: string;
-  choice_source: 'python' | 'fallback' | 'python_error';
+  choice_source: 'python' | 'fallback' | 'python_error' | 'local' | 'ppo';
   policy_debug?: LocalPolicyDebug;
 };
 
@@ -652,8 +653,9 @@ function choiceLooksDisabledInRequest(choice: string, req: any): boolean {
 export async function runOneBattle(opts: {
   formatId: string;
   seed: number;
-  p1: { name: string; team: string; policyMode: PolicyMode; python?: PythonClient };
-  p2: { name: string; team: string; policyMode: PolicyMode; python?: PythonClient };
+  p1: { name: string; team: string; policyMode: PolicyMode; python?: PythonClient; teamPreviewChoice?: string };
+  p2: { name: string; team: string; policyMode: PolicyMode; python?: PythonClient; teamPreviewChoice?: string };
+  ppo?: PpoBattleCoordinator;
   debug?: DebugCtx;
   trace?: TraceFn;
 }): Promise<BattleResult> {
@@ -681,6 +683,11 @@ export async function runOneBattle(opts: {
       for (const line of chunk.split('\n')) {
         if (!line.startsWith('|')) continue;
         log.push(line);
+        try {
+          opts.ppo?.ingestSpectatorLine(line);
+        } catch {
+          // ignore
+        }
         const parts = line.split('|');
         if (parts[1] === 'turn') turns = Number(parts[2] ?? turns);
         if (parts[1] === 'win') {
@@ -739,6 +746,35 @@ export async function runOneBattle(opts: {
       throw new Error(`Battle timed out waiting for completion: ${JSON.stringify(extra)}`);
     }
 
+    // Hygiene: if the engine reports an invalid choice for either side, fail-fast immediately.
+    // This must run even if the latest request is `wait`/null; otherwise we can hang until timeout.
+    const p1ErrNow = p1.lastError;
+    if (isInvalidChoiceError(p1ErrNow)) {
+      const r1Now = p1.lastRequest as any;
+      if (opts.p1.policyMode === 'ppo' && opts.ppo) {
+        opts.ppo.dumpInvalidChoice({
+          player: 'p1',
+          turn: turns,
+          req: r1Now,
+          note: { last_error: p1ErrNow, last_choice: p1.lastChoice },
+        });
+      }
+      throw new Error(`Invalid choice detected for p1: ${String(p1ErrNow ?? '')}`);
+    }
+    const p2ErrNow = p2.lastError;
+    if (isInvalidChoiceError(p2ErrNow)) {
+      const r2Now = p2.lastRequest as any;
+      if (opts.p2.policyMode === 'ppo' && opts.ppo) {
+        opts.ppo.dumpInvalidChoice({
+          player: 'p2',
+          turn: turns,
+          req: r2Now,
+          note: { last_error: p2ErrNow, last_choice: p2.lastChoice },
+        });
+      }
+      throw new Error(`Invalid choice detected for p2: ${String(p2ErrNow ?? '')}`);
+    }
+
     const r1 = p1.lastRequest as any;
     const r2 = p2.lastRequest as any;
 
@@ -752,8 +788,20 @@ export async function runOneBattle(opts: {
       if (debug && debugLines++ < 20) {
         console.log(`[vgc-demo][p1] req teamPreview=${!!r1.teamPreview} wait=${!!r1.wait} forceSwitch=${!!r1.forceSwitch} active=${(r1.active ?? []).length}`);
       }
-      const hadInvalid = isInvalidChoiceError(p1.lastError);
-      if (hadInvalid) p1.lastError = null;
+      const p1Err = p1.lastError;
+      const hadInvalid = isInvalidChoiceError(p1Err);
+      if (hadInvalid) {
+        // Strict hygiene in PPO mode: dump + stop immediately.
+        if (opts.p1.policyMode === 'ppo' && opts.ppo) {
+          opts.ppo.dumpInvalidChoice({
+            player: 'p1',
+            turn: turns,
+            req: r1,
+            note: { last_error: p1Err, last_choice: p1.lastChoice },
+          });
+        }
+        throw new Error(`Invalid choice detected for p1: ${String(p1Err ?? '')}`);
+      }
 
       const choiceAttempt = p1.choiceCount;
       let d = await getChoiceForPlayer({
@@ -762,12 +810,24 @@ export async function runOneBattle(opts: {
         formatId: opts.formatId,
         policyMode: opts.p1.policyMode,
         python: opts.p1.python,
+        teamPreviewChoice: opts.p1.teamPreviewChoice,
         turn: turns,
         player: 'p1',
         debug: opts.debug,
+        ppo: opts.ppo,
       });
 
-      if (hadInvalid || choiceLooksDisabledInRequest(d.choice_norm, r1)) {
+      if (choiceLooksDisabledInRequest(d.choice_norm, r1)) {
+        if (opts.p1.policyMode === 'ppo' && opts.ppo) {
+          opts.ppo.dumpPpoDisabledChoice({
+            player: 'p1',
+            turn: turns,
+            req: r1,
+            attempted_choice: d.choice_norm,
+            source: d.choice_source,
+          });
+          throw new Error(`PPO produced disabled choice for p1: ${d.choice_norm}`);
+        }
         const fallback = pickRandomChoiceFromRequest(r1, opts.seed + turns * 17 + 1 + choiceAttempt * 997 + 123);
         d = { choice_raw: d.choice_raw, choice_norm: fallback, choice_source: 'fallback' };
       }
@@ -793,8 +853,19 @@ export async function runOneBattle(opts: {
       if (debug && debugLines++ < 20) {
         console.log(`[vgc-demo][p2] req teamPreview=${!!r2.teamPreview} wait=${!!r2.wait} forceSwitch=${!!r2.forceSwitch} active=${(r2.active ?? []).length}`);
       }
-      const hadInvalid = isInvalidChoiceError(p2.lastError);
-      if (hadInvalid) p2.lastError = null;
+      const p2Err = p2.lastError;
+      const hadInvalid = isInvalidChoiceError(p2Err);
+      if (hadInvalid) {
+        if (opts.p2.policyMode === 'ppo' && opts.ppo) {
+          opts.ppo.dumpInvalidChoice({
+            player: 'p2',
+            turn: turns,
+            req: r2,
+            note: { last_error: p2Err, last_choice: p2.lastChoice },
+          });
+        }
+        throw new Error(`Invalid choice detected for p2: ${String(p2Err ?? '')}`);
+      }
 
       const choiceAttempt = p2.choiceCount;
       let d = await getChoiceForPlayer({
@@ -803,12 +874,24 @@ export async function runOneBattle(opts: {
         formatId: opts.formatId,
         policyMode: opts.p2.policyMode,
         python: opts.p2.python,
+        teamPreviewChoice: opts.p2.teamPreviewChoice,
         turn: turns,
         player: 'p2',
         debug: opts.debug,
+        ppo: opts.ppo,
       });
 
-      if (hadInvalid || choiceLooksDisabledInRequest(d.choice_norm, r2)) {
+      if (choiceLooksDisabledInRequest(d.choice_norm, r2)) {
+        if (opts.p2.policyMode === 'ppo' && opts.ppo) {
+          opts.ppo.dumpPpoDisabledChoice({
+            player: 'p2',
+            turn: turns,
+            req: r2,
+            attempted_choice: d.choice_norm,
+            source: d.choice_source,
+          });
+          throw new Error(`PPO produced disabled choice for p2: ${d.choice_norm}`);
+        }
         const fallback = pickRandomChoiceFromRequest(r2, opts.seed + turns * 17 + 2 + choiceAttempt * 997 + 456);
         d = { choice_raw: d.choice_raw, choice_norm: fallback, choice_source: 'fallback' };
       }
@@ -841,6 +924,17 @@ export async function runOneBattle(opts: {
   }
 
   const ms = nowMs() - started;
+
+  // PPO terminal reward assignment.
+  if (opts.ppo) {
+    const winnerTag = winner === opts.p1.name ? 'p1' : winner === opts.p2.name ? 'p2' : null;
+    try {
+      opts.ppo.finalizeBattle(winnerTag);
+    } catch {
+      // ignore
+    }
+  }
+
   debugEmit(opts.debug, {
     type: 'battle_end',
     winner,
@@ -858,6 +952,8 @@ export async function runOneBattle(opts: {
       policy:
         opts.p1.policyMode === 'python'
           ? `python:${opts.p1.python?.policy}`
+          : opts.p1.policyMode === 'ppo'
+            ? 'ppo'
           : opts.p1.policyMode === 'local'
             ? 'local:battle_policy'
             : 'fallback',
@@ -867,6 +963,8 @@ export async function runOneBattle(opts: {
       policy:
         opts.p2.policyMode === 'python'
           ? `python:${opts.p2.python?.policy}`
+          : opts.p2.policyMode === 'ppo'
+            ? 'ppo'
           : opts.p2.policyMode === 'local'
             ? 'local:battle_policy'
             : 'fallback',
@@ -880,15 +978,32 @@ async function getChoiceForPlayer(args: {
   formatId: string;
   policyMode: PolicyMode;
   python?: PythonClient;
+  teamPreviewChoice?: string;
   turn: number;
   player: string;
   debug?: DebugCtx;
+  ppo?: PpoBattleCoordinator;
 }): Promise<{
   choice_raw: string;
   choice_norm: string;
-  choice_source: 'python' | 'fallback' | 'python_error' | 'local';
+  choice_source: 'python' | 'fallback' | 'python_error' | 'local' | 'ppo';
   policy_debug?: LocalPolicyDebug;
 }> {
+  if (args.req?.teamPreview && args.teamPreviewChoice) {
+    const raw = String(args.teamPreviewChoice).trim();
+    const normalized = normalizeChoiceForRequest(raw, args.req);
+    debugEmit(args.debug, {
+      type: 'choice',
+      player: args.player,
+      turn: args.turn,
+      source: 'local',
+      choice_raw: raw,
+      choice: normalized,
+      changed: normalized !== raw,
+    });
+    return { choice_raw: raw, choice_norm: normalized, choice_source: 'local' };
+  }
+
   if (args.policyMode === 'python' && args.python) {
     try {
       const res = await postJson(`${args.python.baseUrl}/choose`, {
@@ -932,6 +1047,39 @@ async function getChoiceForPlayer(args: {
         changed: normalized !== raw,
       });
       return { choice_raw: raw, choice_norm: normalized, choice_source: 'python_error' };
+    }
+  }
+
+  if (args.policyMode === 'ppo' && args.ppo) {
+    try {
+      const raw = String(
+        await args.ppo.chooseForRequest({
+          player: args.player === 'p2' ? 'p2' : 'p1',
+          req: args.req,
+          turn: args.turn,
+          seed: args.seed,
+        })
+      ).trim();
+      const normalized = normalizeChoiceForRequest(raw, args.req);
+      debugEmit(args.debug, {
+        type: 'choice',
+        player: args.player,
+        turn: args.turn,
+        source: 'ppo',
+        choice_raw: raw,
+        choice: normalized,
+        changed: normalized !== raw,
+      });
+      return { choice_raw: raw, choice_norm: normalized, choice_source: 'ppo' };
+    } catch (e: any) {
+      debugEmit(args.debug, {
+        type: 'choice',
+        player: args.player,
+        turn: args.turn,
+        source: 'ppo_error',
+        error: String(e?.message ?? e),
+      });
+      throw e;
     }
   }
 

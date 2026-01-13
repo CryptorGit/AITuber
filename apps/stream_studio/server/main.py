@@ -814,12 +814,20 @@ def _append_anim_select_log(
     error: Optional[str] = None,
 ) -> None:
     try:
+        import os
+
+        timeout_env = (os.getenv("AITUBER_ANIM_LLM_TIMEOUT_SEC") or "").strip()
         writer = JsonlWriter(_anim_select_log_path(data_dir))
         writer.append(
             {
                 "ts": utc_iso(),
                 "ok": bool(ok),
                 "playback_id": str(playback_id or ""),
+                "in_meta": {
+                    "len_user_text": len(req.user_text or ""),
+                    "len_overlay_text": len(req.overlay_text or ""),
+                    "len_speech_text": len(req.speech_text or ""),
+                },
                 "in": {
                     "user_text": _clip_text(req.user_text, 600),
                     "overlay_text": _clip_text(req.overlay_text, 600),
@@ -832,6 +840,7 @@ def _append_anim_select_log(
                     "temperature": float(cfg.temperature),
                     "max_output_tokens": int(cfg.max_output_tokens),
                     "json_strict": bool(cfg.json_strict),
+                    "timeout_sec_env": timeout_env,
                     # system_prompt can be large; store only a short prefix for diagnostics
                     "system_prompt_prefix": _clip_text(getattr(cfg, "system_prompt", ""), 200),
                 },

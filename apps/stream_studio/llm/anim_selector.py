@@ -53,6 +53,66 @@ def _fallback(*, reason: str, elapsed_ms: int = 0) -> AnimationSelectOut:
     )
 
 
+def _neutral_fallback(*, reason: str, elapsed_ms: int = 0) -> AnimationSelectOut:
+    # For failures/timeouts, prefer a stable "do no harm" selection.
+    return AnimationSelectOut(
+        expression="exp_01",  # neutral
+        motion="IDLE_DEFAULT",
+        reset_after_tts=True,
+        reason=("neutral|" + (reason or "fallback"))[:200],
+        elapsed_ms=int(elapsed_ms) if elapsed_ms is not None else 0,
+    )
+
+
+def _clip_middle(text: str, max_chars: int) -> str:
+    """Clip long text for prompt size/latency control.
+
+    Keeps both head and tail to preserve context while reducing token count.
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    if max_chars <= 0:
+        return ""
+    if len(t) <= max_chars:
+        return t
+    head = max(0, (max_chars // 2) - 2)
+    tail = max(0, max_chars - head - 5)
+    if head <= 0 or tail <= 0:
+        return t[: max(0, max_chars - 3)] + "..."
+    return t[:head] + " ... " + t[-tail:]
+
+
+def _normalize_expression(expr: str) -> Optional[str]:
+    e = (expr or "").strip()
+    if not e:
+        return ""
+    low = e.lower()
+    if low in ("neutral", "default", "normal"):
+        return "exp_01"
+    if low.startswith("exp_"):
+        suffix = low[4:]
+        if suffix.isdigit():
+            return f"exp_{int(suffix):02d}"
+    # Unknown expression IDs are likely to no-op on the Stage, so treat as invalid.
+    return None
+
+
+def _normalize_motion(motion: str) -> Optional[str]:
+    m = (motion or "").strip()
+    if not m:
+        return ""
+    low = m.lower()
+    if low in ("idle", "default", "neutral"):
+        return "IDLE_DEFAULT"
+    if len(m) > 80:
+        return None
+    for ch in m:
+        if not (ch.isalnum() or ch in "_-:"):
+            return None
+    return m
+
+
 def _heuristic_expression(text: str) -> str:
     t = (text or "").strip()
     if not t:
@@ -85,20 +145,32 @@ def _heuristic_fallback(
     overlay_text: str,
     speech_text: str,
 ) -> AnimationSelectOut:
-    # Prefer speech_text because it's what will be spoken.
-    basis = (speech_text or "").strip() or (overlay_text or "").strip() or (user_text or "").strip()
-    exp = _heuristic_expression(basis)
-    return AnimationSelectOut(
-        expression=exp,
-        motion="Idle",
-        reset_after_tts=True,
-        reason=("heuristic|" + (reason or "fallback"))[:200],
-        elapsed_ms=int(elapsed_ms) if elapsed_ms is not None else 0,
-    )
+    # Kept for compatibility, but default to a neutral safe value.
+    # (Heuristics can be reintroduced if needed, but neutral is the safest fallback.)
+    return _neutral_fallback(reason=(reason or "fallback"), elapsed_ms=elapsed_ms)
 
 
 _cooldown_lock = threading.Lock()
 _cooldown_until: float = 0.0
+
+_client_lock = threading.Lock()
+_client_cache: Dict[str, Any] = {}
+
+
+def _get_genai_client(api_key: str) -> Any:
+    # Cache clients to reduce per-request overhead.
+    key = (api_key or "").strip()
+    if not key:
+        return None
+    with _client_lock:
+        c = _client_cache.get(key)
+        if c is not None:
+            return c
+        from google import genai
+
+        c = genai.Client(api_key=key)
+        _client_cache[key] = c
+        return c
 
 
 def _in_cooldown() -> bool:
@@ -125,9 +197,9 @@ def _call_gemini_text(
     user_text: str,
     generation_config: Dict[str, Any],
 ) -> str:
-    from google import genai
-
-    client = genai.Client(api_key=api_key)
+    client = _get_genai_client(api_key)
+    if client is None:
+        return ""
     kwargs: Dict[str, Any] = {
         "model": model,
         "contents": [{"role": "user", "parts": [{"text": user_text}]}],
@@ -202,13 +274,7 @@ def select_animation(
     # If we've recently been rate-limited, skip calling the LLM for a bit.
     if _in_cooldown():
         dt_ms = int((time.perf_counter() - t0) * 1000)
-        return _heuristic_fallback(
-            reason="cooldown_active",
-            elapsed_ms=dt_ms,
-            user_text=user_text,
-            overlay_text=overlay_text,
-            speech_text=speech_text,
-        )
+        return _neutral_fallback(reason="cooldown_active", elapsed_ms=dt_ms)
 
     sys = (config.system_prompt or "").strip()
     strict_line = (
@@ -217,20 +283,21 @@ def select_animation(
         else "Return JSON if possible."
     )
 
+    # Keep prompt small. The system prompt (if set) already contains most rules.
+    # Large prompts significantly increase latency and trigger our timeout.
+    clip_n = 500
+    ctx_user = _clip_middle(user_text, clip_n)
+    ctx_overlay = _clip_middle(overlay_text, clip_n)
+    ctx_speech = _clip_middle(speech_text, clip_n)
+
     prompt = (
-        "You are an animation selector for a Live2D avatar. "
-        "Choose an expression and a motion tag suitable for the currently spoken line.\n"
-        f"{strict_line}\n\n"
-        "Schema:\n"
-        "{\"expression\": string, \"motion\": string, \"reset_after_tts\": boolean, \"reason\": string}\n\n"
-        "Guidelines:\n"
-        "- expression: an identifier like exp_01 (empty string means no change)\n"
-        "- motion: a motion tag like IDLE_DEFAULT (empty string means no motion)\n"
-        "- reset_after_tts: true to reset to default when TTS ends\n\n"
-        "Context (may be partial):\n"
-        f"[user_text]\n{(user_text or '').strip()}\n\n"
-        f"[overlay_text]\n{(overlay_text or '').strip()}\n\n"
-        f"[speech_text]\n{(speech_text or '').strip()}\n"
+        f"{strict_line}\n"
+        "Output JSON with schema: "
+        "{\"expression\": string, \"motion\": string, \"reset_after_tts\": boolean, \"reason\": string}.\n\n"
+        "Context:\n"
+        f"[user_text]\n{ctx_user}\n\n"
+        f"[overlay_text]\n{ctx_overlay}\n\n"
+        f"[speech_text]\n{ctx_speech}\n"
     ).strip()
 
     # This endpoint is called during TTS playback; it must be fast.
@@ -274,13 +341,7 @@ def select_animation(
         if not text:
             last_err = "empty_response"
             dt_ms = int((time.perf_counter() - t0) * 1000)
-            return _heuristic_fallback(
-                reason=("anim_select_failed|" + last_err)[:200],
-                elapsed_ms=dt_ms,
-                user_text=user_text,
-                overlay_text=overlay_text,
-                speech_text=speech_text,
-            )
+            return _neutral_fallback(reason=("anim_select_failed|" + last_err)[:200], elapsed_ms=dt_ms)
 
         obj = _extract_json(text)
         out = AnimationSelectOut.model_validate(obj)
@@ -289,6 +350,16 @@ def select_animation(
             out.elapsed_ms = dt_ms
         except Exception:
             pass
+
+        exp_norm = _normalize_expression(out.expression)
+        mot_norm = _normalize_motion(out.motion)
+        if exp_norm is None or mot_norm is None:
+            return _neutral_fallback(reason="invalid_llm_output", elapsed_ms=dt_ms)
+        try:
+            out.expression = exp_norm
+            out.motion = mot_norm
+        except Exception:
+            return _neutral_fallback(reason="invalid_llm_output", elapsed_ms=dt_ms)
         return out
     except concurrent.futures.TimeoutError:
         last_err = f"TimeoutError:{timeout_seconds}s"
@@ -298,19 +369,7 @@ def select_animation(
     dt_ms = int((time.perf_counter() - t0) * 1000)
     if last_err and ("RESOURCE_EXHAUSTED" in last_err or "429" in last_err):
         _start_cooldown()
-        return _heuristic_fallback(
-            reason=("anim_select_failed|rate_limited|" + last_err)[:200],
-            elapsed_ms=dt_ms,
-            user_text=user_text,
-            overlay_text=overlay_text,
-            speech_text=speech_text,
-        )
+        return _neutral_fallback(reason=("anim_select_failed|rate_limited|" + last_err)[:200], elapsed_ms=dt_ms)
     if last_err and last_err.startswith("TimeoutError"):
-        return _heuristic_fallback(
-            reason=("anim_select_failed|" + (last_err or "unknown"))[:200],
-            elapsed_ms=dt_ms,
-            user_text=user_text,
-            overlay_text=overlay_text,
-            speech_text=speech_text,
-        )
-    return _fallback(reason=("anim_select_failed|" + (last_err or "unknown"))[:200], elapsed_ms=dt_ms)
+        return _neutral_fallback(reason=("anim_select_failed|" + (last_err or "unknown"))[:200], elapsed_ms=dt_ms)
+    return _neutral_fallback(reason=("anim_select_failed|" + (last_err or "unknown"))[:200], elapsed_ms=dt_ms)

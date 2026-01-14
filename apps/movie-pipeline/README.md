@@ -16,9 +16,9 @@ This folder contains the production-ready movie-pipeline implementation for repl
 - Playwright (installed via core package)
 
 ## Data layout
-- Replays: `data/replays/{battle_id}/replay.mp4` (or any `.mp4`)
-- Logs: `data/replays/{battle_id}/battle_log.json|jsonl|txt`
-- Timestamps: `data/replays/{battle_id}/ts_log.json` (optional but recommended)
+- Replays: `data/movie-pipeline/replays/{battle_id}/replay.mp4` (or any `.mp4`)
+- Logs: `data/movie-pipeline/replays/{battle_id}/battle_log.json|jsonl|txt`
+- Timestamps: `data/movie-pipeline/replays/{battle_id}/ts_log.json` (optional but recommended)
 - BGM: `data/movie-pipeline/bgm/*.mp3`
 - Characters: `data/movie-pipeline/characters/{character_id}/character.json`
 
@@ -87,7 +87,7 @@ npm run start -- run --project-id <project_id> --step all --force
 # Doctor
 npm run start -- doctor
 
-# Generate sample data under data/replays
+# Generate sample data under data/movie-pipeline/replays
 npm run start -- sample --battle-id sample_demo
 ```
 
@@ -131,7 +131,8 @@ Run logs are stored per run: `data/movie-pipeline/projects/{project_id}/runs/{ru
 
 ## Environment overrides
 - `MP_DATA_ROOT` ? override `data/movie-pipeline`
-- `MP_ASSETS_ROOT` ? override `data/replays`
+- `MP_ASSETS_ROOT` ? override `data/movie-pipeline/replays`
+- `MP_BGM_ROOT` ? override `data/movie-pipeline/bgm` (e.g. point at a folder under `tools/`)
 - `MP_CHARACTERS_ROOT` ? override `data/movie-pipeline/characters`
 - `MP_PORT` ? server port
 - `VITE_MP_API_BASE` ? UI API base

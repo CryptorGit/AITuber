@@ -42,6 +42,91 @@ function runCommand(bin: string, args: string[], log?: StepLogger) {
   });
 }
 
+export function runFfmpeg(args: string[], log?: StepLogger) {
+  return runCommand('ffmpeg', args, log);
+}
+
+export async function probeDurationSec(filePath: string): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    if (!fs.existsSync(filePath)) return reject(new Error(`Missing file: ${filePath}`));
+    const proc = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nk=1:nw=1', filePath]);
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (d) => (out += String(d)));
+    proc.stderr.on('data', (d) => (err += String(d)));
+    proc.on('error', (e) => reject(e));
+    proc.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`ffprobe failed (${code}): ${err}`));
+      const dur = Number(out.trim());
+      if (!Number.isFinite(dur)) return reject(new Error(`ffprobe invalid duration: ${out}`));
+      resolve(dur);
+    });
+  });
+}
+
+export async function generateSilentWav(opts: { outWav: string; durationSec: number; sampleRate?: number; channels?: number; log?: StepLogger }) {
+  const sr = opts.sampleRate ?? 48000;
+  const ch = opts.channels ?? 1;
+  const dur = Math.max(0.05, opts.durationSec);
+  await runFfmpeg(
+    [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      `anullsrc=r=${sr}:cl=${ch === 1 ? 'mono' : 'stereo'}`,
+      '-t',
+      String(dur),
+      '-c:a',
+      'pcm_s16le',
+      opts.outWav,
+    ],
+    opts.log
+  );
+}
+
+export async function wavToMp3(opts: { inWav: string; outMp3: string; log?: StepLogger }) {
+  await runFfmpeg(['-y', '-i', opts.inWav, '-c:a', 'libmp3lame', '-q:a', '4', opts.outMp3], opts.log);
+}
+
+export async function fitWavToDuration(opts: { inWav: string; outWav: string; targetSec: number; log?: StepLogger }) {
+  const target = Math.max(0.05, opts.targetSec);
+  const current = await probeDurationSec(opts.inWav);
+  if (!Number.isFinite(current) || current <= 0) {
+    throw new Error(`invalid input wav duration: ${current}`);
+  }
+
+  // atempo supports 0.5..2.0; chain if needed.
+  const desiredTempo = current / target;
+  const tempos: number[] = [];
+  let remaining = desiredTempo;
+  while (remaining > 2.0) {
+    tempos.push(2.0);
+    remaining /= 2.0;
+  }
+  while (remaining < 0.5) {
+    tempos.push(0.5);
+    remaining /= 0.5;
+  }
+  tempos.push(remaining);
+
+  const atempo = tempos.map((t) => `atempo=${t.toFixed(6)}`).join(',');
+  const filter = `${atempo},apad,atrim=0:${target.toFixed(6)}`;
+
+  await runFfmpeg(['-y', '-i', opts.inWav, '-filter:a', filter, '-c:a', 'pcm_s16le', opts.outWav], opts.log);
+}
+
+export async function concatWavs(opts: { inputs: string[]; outWav: string; log?: StepLogger }) {
+  if (!opts.inputs.length) throw new Error('concatWavs: no inputs');
+
+  // Use concat demuxer for robustness.
+  const listPath = `${opts.outWav}.concat.txt`;
+  const lines = opts.inputs.map((p) => `file '${path.resolve(p).replace(/'/g, "'\\''")}'`).join('\n');
+  fs.writeFileSync(listPath, lines, 'utf8');
+
+  await runFfmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'pcm_s16le', opts.outWav], opts.log);
+}
+
 function escapeFilterPath(p: string) {
   const normalized = path.resolve(p).replace(/\\/g, '/');
   return normalized.replace(/:/g, '\\:').replace(/'/g, "\\'");
@@ -80,16 +165,17 @@ export function buildFilterComplex(opts: ComposeOptions, burnSubtitles: boolean)
   const ttsIndex = opts.overlay ? 2 : 1;
   if (opts.bgm_audio) {
     const bgmIndex = opts.overlay ? 3 : 2;
-    audioFilters.push(`[${ttsIndex}:a]volume=${opts.tts_volume}[a_tts]`);
-    audioFilters.push(`[${bgmIndex}:a]volume=${opts.bgm_volume}[a_bgm]`);
+    audioFilters.push(`[${ttsIndex}:a:0]volume=${opts.tts_volume}[a_tts]`);
+    audioFilters.push(`[${bgmIndex}:a:0]volume=${opts.bgm_volume}[a_bgm]`);
     if (opts.ducking) {
-      audioFilters.push('[a_bgm][a_tts]sidechaincompress=threshold=0.02:ratio=8:attack=5:release=200[a_bgm_duck]');
-      audioFilters.push('[a_tts][a_bgm_duck]amix=inputs=2:duration=first:dropout_transition=2[a]');
+      audioFilters.push('[a_tts]asplit=2[a_tts_sc][a_tts_mix]');
+      audioFilters.push('[a_bgm][a_tts_sc]sidechaincompress=threshold=0.02:ratio=8:attack=5:release=200[a_bgm_duck]');
+      audioFilters.push('[a_tts_mix][a_bgm_duck]amix=inputs=2:duration=first:dropout_transition=2[a]');
     } else {
       audioFilters.push('[a_tts][a_bgm]amix=inputs=2:duration=first:dropout_transition=2[a]');
     }
   } else {
-    audioFilters.push(`[${ttsIndex}:a]volume=${opts.tts_volume}[a]`);
+    audioFilters.push(`[${ttsIndex}:a:0]volume=${opts.tts_volume}[a]`);
   }
 
   return [...filters, ...audioFilters].join(';');

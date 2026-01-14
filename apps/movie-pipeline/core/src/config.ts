@@ -30,10 +30,16 @@ export const voicevoxTtsSettingsSchema = z.object({
   post_phoneme_length: z.number().min(0.0).max(1.0),
 });
 
+export const mockTtsSettingsSchema = z.object({
+  tone_hz: z.number().min(50).max(2000),
+  sample_rate_hz: z.number().int().min(8000).max(48000),
+});
+
 export const ttsSettingsSchema = z.object({
-  provider: z.enum(['google', 'voicevox']),
+  provider: z.enum(['google', 'voicevox', 'mock']),
   google: googleTtsSettingsSchema,
   voicevox: voicevoxTtsSettingsSchema,
+  mock: mockTtsSettingsSchema,
 });
 
 export const renderSettingsSchema = z.object({
@@ -108,14 +114,18 @@ export function defaultProjectSettings(): ProjectSettings {
         pre_phoneme_length: 0.1,
         post_phoneme_length: 0.1,
       },
+      mock: {
+        tone_hz: 440,
+        sample_rate_hz: 24000,
+      },
     },
     render: {
-      width: 720,
+      width: 1280,
       height: 720,
       fps: 30,
       chroma_key: '#00ff00',
-      overlay_x: 'W-w-48',
-      overlay_y: 'H-h-48',
+      overlay_x: '0',
+      overlay_y: '0',
       overlay_scale: 1.0,
       renderer: 'simple_canvas',
     },
@@ -173,6 +183,7 @@ export function mergeSettings(partial?: Partial<ProjectSettings>): ProjectSettin
       provider,
       google: { ...defaults.tts.google, ...legacyGoogle, ...(rawTts.google || {}) },
       voicevox: { ...defaults.tts.voicevox, ...legacyVoicevox, ...(rawTts.voicevox || {}) },
+      mock: { ...defaults.tts.mock, ...(rawTts.mock || {}) },
     },
     render: { ...defaults.render, ...(partial.render || {}) },
     audio: { ...defaults.audio, ...(partial.audio || {}) },

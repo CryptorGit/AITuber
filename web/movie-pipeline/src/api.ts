@@ -29,12 +29,18 @@ export type AssetRegistry = {
   assets: AssetEntry[];
 };
 
-export type BgmEntry = { name: string; path: string; size_bytes: number };
+export type BgmEntry = {
+  name: string;
+  path: string;
+  size_bytes: number;
+  loop?: { start_sec: number; end_sec: number } | null;
+};
 
 export type CharacterProfile = {
   character_id: string;
   name: string;
   renderer: 'simple_canvas';
+  model_dir?: string;
 };
 
 export type ProjectSettings = {
@@ -80,7 +86,7 @@ export type ProjectSettings = {
 export type ProjectInputs = {
   battle_id: string;
   base_mp4: string;
-  battle_log: string;
+  battle_log: string | null;
   ts_log: string | null;
   bgm_mp3: string | null;
   character_id: string | null;
@@ -89,12 +95,15 @@ export type ProjectInputs = {
 export type ProjectOutputs = {
   script_json: string | null;
   script_timed_json: string | null;
+  narration_timeline_json: string | null;
+  subtitle_timeline_json: string | null;
   subtitles_draft_srt: string | null;
   subtitles_srt: string | null;
   subtitles_ass: string | null;
   tts_wav: string | null;
   tts_mp3: string | null;
   tts_timing_json: string | null;
+  live2d_motion_json: string | null;
   overlay_webm: string | null;
   overlay_mp4: string | null;
   lip_sync_json: string | null;
@@ -152,13 +161,21 @@ export async function getAssets(refresh?: boolean) {
   return fetchJson<{ registry: AssetRegistry; bgm: BgmEntry[]; characters: CharacterProfile[] }>(url.toString());
 }
 
+export function assetMediaUrl(battleId: string, kind: 'base_mp4' | 'battle_log' | 'ts_log') {
+  const url = new URL(API_BASE + `/api/mp/assets/${encodeURIComponent(battleId)}/media`);
+  url.searchParams.set('kind', kind);
+  return url.toString();
+}
+
 export async function getProjects() {
   return fetchJson<{ projects: ProjectRecord[] }>(API_BASE + '/api/mp/projects');
 }
 
 export async function createProject(payload: {
   battle_id: string;
+  project_id?: string;
   bgm_path?: string | null;
+  bgm_name?: string | null;
   character_id?: string | null;
   settings?: Partial<ProjectSettings>;
 }) {
@@ -169,11 +186,23 @@ export async function createProject(payload: {
   });
 }
 
+export function bgmMediaUrl(name: string) {
+  return API_BASE + `/api/mp/bgm/${encodeURIComponent(name)}`;
+}
+
 export async function updateProject(projectId: string, payload: { settings?: Partial<ProjectSettings>; bgm_path?: string | null; character_id?: string | null }) {
   return fetchJson<ProjectRecord>(API_BASE + `/api/mp/projects/${encodeURIComponent(projectId)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteProject(projectId: string, opts?: { hard?: boolean }) {
+  const url = new URL(API_BASE + `/api/mp/projects/${encodeURIComponent(projectId)}`);
+  if (opts?.hard) url.searchParams.set('hard', 'true');
+  return fetchJson<{ deleted: boolean; project: ProjectRecord }>(url.toString(), {
+    method: 'DELETE',
   });
 }
 
@@ -183,6 +212,61 @@ export async function updateScript(projectId: string, script: any) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ script }),
   });
+}
+
+export async function updateSubtitleTimeline(projectId: string, timeline: any) {
+  return fetchJson<ProjectRecord>(API_BASE + `/api/mp/projects/${encodeURIComponent(projectId)}/subtitle_timeline`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ timeline }),
+  });
+}
+
+export async function updateLive2dMotion(projectId: string, motion: any) {
+  return fetchJson<ProjectRecord>(API_BASE + `/api/mp/projects/${encodeURIComponent(projectId)}/live2d_motion`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ motion }),
+  });
+}
+
+export async function llmGenerate(
+  projectId: string,
+  payload: { kind: 'script' | 'subtitles' | 'live2d_motion'; prompt: string; model?: string; max_output_tokens?: number }
+) {
+  return fetchJson<{ raw: string; json: any }>(API_BASE + `/api/mp/projects/${encodeURIComponent(projectId)}/llm/generate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getLlmSystemPrompt() {
+  return fetchJson<{ text: string }>(API_BASE + '/api/mp/llm/system_prompt');
+}
+
+export async function updateLlmSystemPrompt(text: string) {
+  return fetchJson<{ ok: boolean }>(API_BASE + '/api/mp/llm/system_prompt', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function getLlmPrompts() {
+  return fetchJson<{ script: string; subtitles: string; live2d_motion: string }>(API_BASE + '/api/mp/llm/prompts');
+}
+
+export async function updateLlmPrompts(payload: { script: string; subtitles: string; live2d_motion: string }) {
+  return fetchJson<{ ok: boolean }>(API_BASE + '/api/mp/llm/prompts', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getLlmConfig() {
+  return fetchJson<{ default_model: string; has_api_key: boolean }>(API_BASE + '/api/mp/llm/config');
 }
 
 export async function getProject(projectId: string) {

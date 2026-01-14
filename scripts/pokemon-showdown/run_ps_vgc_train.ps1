@@ -36,8 +36,8 @@ $agentDir = Join-Path $repoRoot "apps/pokemon-showdown/vgc-demo/agent"
 $orchDir = Join-Path $repoRoot "apps/pokemon-showdown/vgc-demo/orchestrator"
 
 # E2E log capture (file-based evidence). We don't know run_id until TS starts,
-# so write to a temp log then move it into logs/runs/{run_id}/e2e_train.log.
-$logsRoot = Join-Path $repoRoot "logs"
+# so write to a temp log then move it into data/pokemon-showdown/vgc-demo/logs/runs/{run_id}/e2e_train.log.
+$logsRoot = Join-Path $repoRoot "data/pokemon-showdown/vgc-demo/logs"
 $runsRoot = Join-Path $logsRoot "runs"
 New-Item -ItemType Directory -Path $runsRoot -Force | Out-Null
 $tmpLog = Join-Path $logsRoot ("_tmp_vgc_train_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))

@@ -45,6 +45,18 @@ export type ScriptSegment = {
   source_refs: string[];
 };
 
+// Source-of-Truth minimal script.json schema.
+export type ScriptLine = {
+  id: string;
+  text: string;
+};
+
+export type ScriptFile = {
+  battle_id: string;
+  narrator_style?: string;
+  lines: ScriptLine[];
+};
+
 export type ScriptDraft = {
   battle_id: string;
   version: 1;
@@ -74,6 +86,23 @@ export type SubtitleTimeline = {
   items: SubtitleItem[];
 };
 
+// Source-of-Truth timeline contract (seconds). Items may be used for narration or subtitles.
+export type TimelineKind = 'narration' | 'subtitle';
+
+export type TimelineItemSec = {
+  id: string;
+  start: number; // seconds
+  end: number; // seconds
+  text: string;
+  kind: TimelineKind;
+};
+
+export type TimelineFile = {
+  battle_id: string;
+  version: 1;
+  items: TimelineItemSec[];
+};
+
 export type TtsMoraTiming = {
   text: string;
   start_ms: number;
@@ -97,7 +126,12 @@ export type TtsTiming = {
   total_ms: number;
 };
 
-export type TtsProvider = 'google' | 'voicevox';
+export type TtsProvider = 'google' | 'voicevox' | 'mock';
+
+export type MockTtsSettings = {
+  tone_hz: number;
+  sample_rate_hz: number;
+};
 
 export type GoogleTtsSettings = {
   language_code: string;
@@ -133,6 +167,7 @@ export type TtsSettings = {
   provider: TtsProvider;
   google: GoogleTtsSettings;
   voicevox: VoicevoxTtsSettings;
+  mock: MockTtsSettings;
 };
 
 export type LipSyncPoint = { t_ms: number; open: number };
@@ -143,10 +178,25 @@ export type LipSyncTimeline = {
   points: LipSyncPoint[];
 };
 
+// Source-of-Truth Live2D motion contract (seconds). The renderer can interpret these.
+export type Live2dMotionItem = {
+  id: string;
+  start: number; // seconds
+  end: number; // seconds
+  expression?: string | null;
+  motion?: string | null;
+};
+
+export type Live2dMotionFile = {
+  battle_id: string;
+  version: 1;
+  items: Live2dMotionItem[];
+};
+
 export type ProjectInputs = {
   battle_id: string;
   base_mp4: string;
-  battle_log: string;
+  battle_log: string | null;
   ts_log: string | null;
   bgm_mp3: string | null;
   character_id: string | null;
@@ -154,6 +204,8 @@ export type ProjectInputs = {
 
 export type ProjectOutputs = {
   script_json: string | null;
+  narration_timeline_json: string | null;
+  subtitle_timeline_json: string | null;
   script_timed_json: string | null;
   subtitles_draft_srt: string | null;
   subtitles_srt: string | null;
@@ -161,6 +213,7 @@ export type ProjectOutputs = {
   tts_wav: string | null;
   tts_mp3: string | null;
   tts_timing_json: string | null;
+  live2d_motion_json: string | null;
   overlay_webm: string | null;
   overlay_mp4: string | null;
   lip_sync_json: string | null;
@@ -246,6 +299,9 @@ export type CharacterProfile = {
   width: number;
   height: number;
   fps: number;
+  // Optional: points to a folder under dataRoot() where the model assets live.
+  // This does not change rendering behavior yet; it's used for selection + future Live2D integration.
+  model_dir?: string;
 };
 
 export type DoctorStatus = {

@@ -112,7 +112,7 @@ export class PpoRunStats {
     const root = repoRoot();
     this.run_id = String(run_id || '').trim() || makeFallbackRunId();
 
-    const baseDir = join(root, 'logs', 'runs', this.run_id);
+    const baseDir = join(root, 'data', 'pokemon-showdown', 'vgc-demo', 'logs', 'runs', this.run_id);
     this.metricsPath = opts?.metricsPath ?? join(baseDir, 'ppo_train_metrics.jsonl');
     this.dumpsDir = opts?.dumpsDir ?? join(baseDir, 'dumps');
 

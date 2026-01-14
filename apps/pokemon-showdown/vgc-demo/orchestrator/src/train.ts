@@ -172,7 +172,7 @@ async function main() {
     `[train] applied_config ppo_rollout_len=${rolloutCfg.value} source=${rolloutCfg.source} seed=${seed} epochs=${epochs} batches_per_epoch=${batchesPerEpochInt} battles_per_batch=${battlesPerBatchInt} format=${resolved.id}`
   );
 
-  // Ensure PPO writes metrics/dumps under logs/runs/{run_id}/...
+  // Ensure PPO writes metrics/dumps under data/pokemon-showdown/vgc-demo/logs/runs/{run_id}/...
   const ppoStats = new PpoRunStats(runId);
   ppoStats.setAppliedConfig({ rollout_len: rolloutCfg.value, rollout_len_source: rolloutCfg.source });
   ppoStats.forceLogProgress('start');

@@ -9,7 +9,7 @@ param(
   # This avoids VS Code terminal churn during long runs.
   [switch]$Detach,
 
-  # Log directory for detached runs. If empty, a timestamped folder under logs/forever/ is used.
+  # Log directory for detached runs. If empty, a timestamped folder under data/pokemon-showdown/vgc-demo/logs/forever/ is used.
   [string]$LogDir = "",
 
   # How many battles to run per chunk (one invocation of run_ps_vgc_train.ps1).
@@ -42,7 +42,7 @@ if (-not (Test-Path $trainScript)) {
 
 if ($Detach -and $env:VGC_TRAIN_FOREVER_CHILD -ne "1") {
   if (-not $LogDir) {
-    $LogDir = Join-Path $repoRoot ("logs/forever/" + (Get-Date -Format "yyyyMMdd_HHmmss"))
+    $LogDir = Join-Path $repoRoot ("data/pokemon-showdown/vgc-demo/logs/forever/" + (Get-Date -Format "yyyyMMdd_HHmmss"))
   }
 
   New-Item -ItemType Directory -Path $LogDir -Force | Out-Null

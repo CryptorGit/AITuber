@@ -10,11 +10,38 @@ export function repoRoot() {
 }
 
 export function dataRoot() {
-  return process.env.MP_DATA_ROOT ? path.resolve(process.env.MP_DATA_ROOT) : path.join(repoRoot(), 'data', 'movie-pipeline');
+  if (process.env.MP_DATA_ROOT) return path.resolve(process.env.MP_DATA_ROOT);
+  return path.join(repoRoot(), 'data', 'movie-pipeline');
 }
 
 export function assetsRoot() {
-  return process.env.MP_ASSETS_ROOT ? path.resolve(process.env.MP_ASSETS_ROOT) : path.join(repoRoot(), 'data', 'replays');
+  if (process.env.MP_ASSETS_ROOT) return path.resolve(process.env.MP_ASSETS_ROOT);
+
+  const defaultReplays = path.join(dataRoot(), 'replays');
+  const vgcExports = path.join(repoRoot(), 'data', 'pokemon-showdown', 'vgc-demo', 'exports');
+
+  const dirHasTopLevelMatch = (dirPath: string, re: RegExp) => {
+    try {
+      if (!fs.existsSync(dirPath)) return false;
+      for (const name of fs.readdirSync(dirPath)) {
+        if (re.test(name)) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // Prefer the default replays dir only if it actually contains exports.
+  if (dirHasTopLevelMatch(defaultReplays, /\.(mp4|webm|mkv)$/i) || dirHasTopLevelMatch(defaultReplays, /\.battlelog\.jsonl$/i)) {
+    return defaultReplays;
+  }
+  // Common local dev source of exports.
+  if (dirHasTopLevelMatch(vgcExports, /\.(mp4|webm|mkv)$/i) || dirHasTopLevelMatch(vgcExports, /\.battlelog\.jsonl$/i)) {
+    return vgcExports;
+  }
+
+  return defaultReplays;
 }
 
 export function charactersRoot() {
@@ -28,7 +55,7 @@ export function projectsRoot() {
 }
 
 export function bgmRoot() {
-  return path.join(dataRoot(), 'bgm');
+  return process.env.MP_BGM_ROOT ? path.resolve(process.env.MP_BGM_ROOT) : path.join(dataRoot(), 'bgm');
 }
 
 export function registryPath() {
@@ -38,3 +65,4 @@ export function registryPath() {
 export function ensureDir(p: string) {
   fs.mkdirSync(p, { recursive: true });
 }
+

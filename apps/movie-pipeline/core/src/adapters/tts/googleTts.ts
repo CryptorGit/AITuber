@@ -7,10 +7,30 @@ import type { ProjectSettings, GoogleTtsSettings } from '../../types.ts';
 import { ensureDir } from '../../paths.ts';
 import { createStepLogger } from '../../utils/logger.ts';
 
-const GOOGLE_TTS_URL = 'https://texttospeech.googleapis.com/v1/text:synthesize';
+const GOOGLE_TTS_URL_V1 = 'https://texttospeech.googleapis.com/v1/text:synthesize';
+const GOOGLE_TTS_URL_V1BETA1 = 'https://texttospeech.googleapis.com/v1beta1/text:synthesize';
 const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 export type GoogleTimepoint = { markName: string; timeSeconds: number };
+
+function inferSampleRateFromTimepoints(pcmBytes: number, timepoints: GoogleTimepoint[]): number | null {
+  // For LINEAR16 mono, bytes = samples * 2. If we have an end mark time, we can infer sample rate.
+  if (!Number.isFinite(pcmBytes) || pcmBytes <= 0) return null;
+  if (pcmBytes % 2 !== 0) return null;
+  if (!Array.isArray(timepoints) || !timepoints.length) return null;
+
+  let maxSec = 0;
+  for (const tp of timepoints) {
+    const t = Number((tp as any)?.timeSeconds);
+    if (Number.isFinite(t) && t > maxSec) maxSec = t;
+  }
+  if (!Number.isFinite(maxSec) || maxSec <= 0.05) return null;
+
+  const samples = pcmBytes / 2;
+  const sr = Math.round(samples / maxSec);
+  if (!Number.isFinite(sr) || sr < 8000 || sr > 96000) return null;
+  return sr;
+}
 
 function escapeSsml(text: string) {
   return text
@@ -182,45 +202,67 @@ export async function synthesizeGoogleTts(opts: {
   const tts = opts.settings.tts.google;
   const { ssml } = buildSsmlWithMarks(opts.script, tts.ssml_mark_style);
 
-  const requestBody: any = {
-    input: { ssml },
-    voice: {
-      languageCode: tts.language_code,
-      name: tts.voice_name,
-    },
-    audioConfig: {
-      audioEncoding: tts.audio_encoding,
-      speakingRate: tts.speaking_rate,
-      pitch: tts.pitch,
-      volumeGainDb: tts.volume_gain_db,
-      sampleRateHertz: tts.sample_rate_hertz,
-    },
-  };
+  const buildRequestBody = (includeTimepoints: boolean) => {
+    const body: any = {
+      input: { ssml },
+      voice: {
+        languageCode: tts.language_code,
+        name: tts.voice_name,
+      },
+      audioConfig: {
+        audioEncoding: tts.audio_encoding,
+        speakingRate: tts.speaking_rate,
+        pitch: tts.pitch,
+        volumeGainDb: tts.volume_gain_db,
+        sampleRateHertz: tts.sample_rate_hertz,
+      },
+    };
 
-  if (tts.enable_timepoints) {
-    requestBody.enableTimePointing = ['SSML_MARK'];
-  }
+    if (includeTimepoints) {
+      body.enableTimePointing = ['SSML_MARK'];
+    }
+
+    return body;
+  };
 
   log.info(`Google TTS request: voice=${tts.voice_name} lang=${tts.language_code} rate=${tts.speaking_rate} pitch=${tts.pitch}`);
   log.info(`Google TTS audio: encoding=${tts.audio_encoding} sampleRate=${tts.sample_rate_hertz} volumeGainDb=${tts.volume_gain_db}`);
   log.info(`Google TTS marks: enable=${tts.enable_timepoints} style=${tts.ssml_mark_style}`);
 
   const token = await getAccessToken();
-  const res = await fetch(GOOGLE_TTS_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
+  const postSynthesize = async (includeTimepoints: boolean) => {
+    const url = includeTimepoints ? GOOGLE_TTS_URL_V1BETA1 : GOOGLE_TTS_URL_V1;
+    const body = buildRequestBody(includeTimepoints);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Google TTS error ${res.status}: ${text}`);
-  }
+    if (!res.ok) {
+      const err: any = new Error(`Google TTS error ${res.status}: ${text}`);
+      err.status = res.status;
+      err.body = text;
+      throw err;
+    }
 
-  const payload = await res.json();
+    return JSON.parse(text);
+  };
+
+  let payload: any;
+  try {
+    payload = await postSynthesize(Boolean(tts.enable_timepoints));
+  } catch (e: any) {
+    const bodyText = String(e?.body ?? e?.message ?? '');
+    const shouldRetry = Boolean(tts.enable_timepoints) && e?.status === 400 && /enableTimePointing/i.test(bodyText);
+    if (!shouldRetry) throw e;
+    log.warn('Google TTS: enableTimePointing was rejected by API; retrying without timepoints.');
+    payload = await postSynthesize(false);
+  }
   const audioContent = payload.audioContent;
   if (!audioContent) throw new Error('Google TTS response missing audioContent');
 
@@ -228,8 +270,18 @@ export async function synthesizeGoogleTts(opts: {
   const wavPath = path.join(opts.outDir, 'tts.wav');
   const mp3Path = path.join(opts.outDir, 'tts.mp3');
 
+  const timepoints: GoogleTimepoint[] = Array.isArray(payload.timepoints) ? payload.timepoints : [];
+
   if (tts.audio_encoding === 'LINEAR16') {
-    writeLinear16Wav(wavPath, buffer, tts.sample_rate_hertz);
+    // Some voices / API variants may ignore sampleRateHertz for LINEAR16.
+    // If timepoints are present, infer the actual sample rate from (bytes, duration) to avoid fast playback.
+    let sampleRateForWav = tts.sample_rate_hertz;
+    const inferred = inferSampleRateFromTimepoints(buffer.length, timepoints);
+    if (inferred && inferred !== sampleRateForWav) {
+      log.warn(`Google TTS: inferred sample rate ${inferred}Hz (configured ${sampleRateForWav}Hz); using inferred for WAV header`);
+      sampleRateForWav = inferred;
+    }
+    writeLinear16Wav(wavPath, buffer, sampleRateForWav);
     await convertAudio(wavPath, mp3Path, log);
   } else {
     fs.writeFileSync(mp3Path, buffer);
@@ -243,7 +295,6 @@ export async function synthesizeGoogleTts(opts: {
     durationMs = 0;
   }
 
-  const timepoints: GoogleTimepoint[] = Array.isArray(payload.timepoints) ? payload.timepoints : [];
   const timing = timepointsToTiming(opts.script, timepoints, durationMs);
 
   log.info(`Google TTS timing segments: ${timing.segments.length} total_ms=${timing.total_ms}`);

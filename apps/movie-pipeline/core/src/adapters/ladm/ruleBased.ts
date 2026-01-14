@@ -24,11 +24,11 @@ function toTurnKey(turn: number | null) {
 
 export function generateScriptDraft(opts: {
   battleId: string;
-  battleLogPath: string;
+  battleLogPath?: string | null;
   tsLogPath?: string | null;
   settings: ProjectSettings;
 }): ScriptDraft {
-  const events = parseBattleLog(opts.battleLogPath);
+  const events = opts.battleLogPath ? parseBattleLog(opts.battleLogPath) : [];
   const tsInfo = opts.tsLogPath ? parseTsLog(opts.tsLogPath) : null;
 
   const segments: ScriptSegment[] = [];
@@ -47,15 +47,17 @@ export function generateScriptDraft(opts: {
       source_refs: [startLine.text],
     });
   } else {
+    // Fallback when battle_log is unavailable: use the earliest timestamp-log event (or a generic opener).
+    const firstTs = tsInfo?.events?.[0];
     segments.push({
       id: 'seg_000',
-      start_hint_ms: 0,
-      end_hint_ms: opts.settings.ladm.min_segment_ms,
-      text: 'The battle begins!',
+      start_hint_ms: firstTs?.t_ms ?? 0,
+      end_hint_ms: (firstTs?.t_ms ?? 0) + opts.settings.ladm.min_segment_ms,
+      text: firstTs?.text || 'The battle begins!',
       speaker: narrator,
       emotion_tag: 'neutral',
       reason_tags: ['battle-start'],
-      source_refs: [],
+      source_refs: firstTs?.text ? [firstTs.text] : [],
     });
   }
 
@@ -119,6 +121,27 @@ export function generateScriptDraft(opts: {
       reason_tags: ['battle-end'],
       source_refs: [winEvent.text],
     });
+  }
+
+  // If we had no battle_log, create a couple of simple segments from timestamp events to avoid empty scripts.
+  if (!events.length && tsInfo?.events?.length) {
+    const candidates = tsInfo.events
+      .filter((e) => e.text)
+      .slice(0, Math.max(1, Math.min(5, maxSegments - segments.length)));
+    for (const e of candidates) {
+      segIndex += 1;
+      segments.push({
+        id: `seg_${String(segIndex).padStart(3, '0')}`,
+        start_hint_ms: e.t_ms,
+        end_hint_ms: e.t_ms + opts.settings.ladm.min_segment_ms,
+        text: String(e.text),
+        speaker: narrator,
+        emotion_tag: 'neutral',
+        reason_tags: ['tslog'],
+        source_refs: [String(e.text)],
+      });
+      if (segments.length >= maxSegments) break;
+    }
   }
 
   return { battle_id: opts.battleId, version: 1, segments };

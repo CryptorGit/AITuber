@@ -56,8 +56,8 @@ function resolveBgm(bgmArg: string | null) {
 async function createProjectFromBattle(battleId: string, bgmArg: string | null, characterId?: string | null, projectId?: string) {
   const registry = scanAssets();
   const asset = registry.assets.find((a) => a.battle_id === battleId);
-  if (!asset?.base_mp4 || !asset?.battle_log) {
-    throw new Error('asset missing base_mp4/battle_log');
+  if (!asset?.base_mp4 || (!asset?.battle_log && !asset?.ts_log)) {
+    throw new Error('asset missing base_mp4 and (battle_log or ts_log)');
   }
 
   const resolvedId = projectId || `${battleId}_${Date.now()}`;
@@ -75,7 +75,7 @@ async function createProjectFromBattle(battleId: string, bgmArg: string | null, 
     {
       battle_id: battleId,
       base_mp4: asset.base_mp4,
-      battle_log: asset.battle_log,
+      battle_log: asset.battle_log || null,
       ts_log: asset.ts_log || null,
       bgm_mp3: resolveBgm(bgmArg),
       character_id: characterId || null,

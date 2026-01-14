@@ -55,6 +55,8 @@ export function createProjectRecord(projectId: string, inputs: ProjectInputs, se
     settings: mergeSettings(settings),
     outputs: {
       script_json: null,
+      narration_timeline_json: null,
+      subtitle_timeline_json: null,
       script_timed_json: null,
       subtitles_draft_srt: null,
       subtitles_srt: null,
@@ -62,6 +64,7 @@ export function createProjectRecord(projectId: string, inputs: ProjectInputs, se
       tts_wav: null,
       tts_mp3: null,
       tts_timing_json: null,
+      live2d_motion_json: null,
       overlay_webm: null,
       overlay_mp4: null,
       lip_sync_json: null,
@@ -94,7 +97,7 @@ function migrateLegacyStatus(projectId: string, projectPath: string): ProjectRec
   const inputs: ProjectInputs = {
     battle_id: legacy.battle_id || projectId,
     base_mp4: legacy.inputs?.base_mp4 || legacy.inputs?.baseMp4 || legacy.base_mp4 || '',
-    battle_log: legacy.inputs?.battle_log || legacy.battle_log || '',
+    battle_log: legacy.inputs?.battle_log || legacy.battle_log || null,
     ts_log: legacy.inputs?.ts_log || legacy.ts_log || null,
     bgm_mp3: legacy.inputs?.bgm_mp3 || legacy.bgm_mp3 || null,
     character_id: null,
@@ -194,6 +197,8 @@ export function duplicateProject(projectId: string, newId: string) {
     },
     outputs: {
       script_json: null,
+      narration_timeline_json: null,
+      subtitle_timeline_json: null,
       script_timed_json: null,
       subtitles_draft_srt: null,
       subtitles_srt: null,
@@ -201,6 +206,7 @@ export function duplicateProject(projectId: string, newId: string) {
       tts_wav: null,
       tts_mp3: null,
       tts_timing_json: null,
+      live2d_motion_json: null,
       overlay_webm: null,
       overlay_mp4: null,
       lip_sync_json: null,

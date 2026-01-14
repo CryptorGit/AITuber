@@ -9,7 +9,8 @@ import { pipelineVersion } from '../utils/version.ts';
 import { projectArtifactPath } from '../project/store.ts';
 import { writeJson } from '../utils/io.ts';
 
-const ORDER: StepName[] = ['ladm', 'tts', 'live2d', 'compose'];
+// Source-of-Truth flow wants motion+overlay rendered before TTS.
+const ORDER: StepName[] = ['ladm', 'live2d', 'tts', 'compose'];
 
 function nowIso() {
   return new Date().toISOString();
@@ -28,8 +29,8 @@ function stepOutputsReady(project: ProjectRecord, step: StepName) {
   };
 
   if (step === 'ladm') return Boolean(project.outputs.script_json && exists(project.outputs.script_json));
-  if (step === 'tts') return Boolean(project.outputs.tts_wav && project.outputs.subtitles_srt && exists(project.outputs.tts_wav));
-  if (step === 'live2d') return Boolean(project.outputs.overlay_webm && exists(project.outputs.overlay_webm));
+  if (step === 'live2d') return Boolean(project.outputs.overlay_webm && project.outputs.live2d_motion_json && exists(project.outputs.overlay_webm));
+  if (step === 'tts') return Boolean(project.outputs.tts_mp3 && project.outputs.subtitles_ass && exists(project.outputs.tts_mp3));
   if (step === 'compose') return Boolean(project.outputs.final_mp4 && exists(project.outputs.final_mp4));
   return false;
 }

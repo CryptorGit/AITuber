@@ -68,8 +68,8 @@ pnpm-debug.log*
 /tools/
 
 ### Live2D web assets (licensed / user-provided)
-/web/stream_studio/vendor/live2dcubismcore*.js
-/web/stream_studio/models/
+/web/stream-studio/vendor/live2dcubismcore*.js
+/web/stream-studio/models/
 
 ### Local test artifacts
 /tests/image_test.jpg

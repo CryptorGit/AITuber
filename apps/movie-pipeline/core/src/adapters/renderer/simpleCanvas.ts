@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import type { ScriptTimed, TtsTiming, LipSyncTimeline, ProjectSettings } from '../../types.ts';
 import { ensureDir } from '../../paths.ts';
 import { createStepLogger } from '../../utils/logger.ts';
+import { runFfmpeg } from '../../pipeline/ffmpeg.ts';
 
 function rendererHtml() {
   return `<!doctype html>
@@ -18,108 +19,115 @@ function rendererHtml() {
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <audio id="audio"></audio>
   <script>
-    const config = window.__MP_CONFIG__;
-    const canvas = document.getElementById('stage');
-    const ctx = canvas.getContext('2d');
-    canvas.width = config.width;
-    canvas.height = config.height;
+    // Always define these so the Node side can query status even if boot fails.
+    window.__MP_DONE__ = false;
+    window.__MP_LIP_SYNC__ = [];
+    window.__MP_BOOT_ERROR__ = null;
+    window.__MP_START__ = async () => {
+      try {
+        const config = window.__MP_CONFIG__;
+        const canvas = document.getElementById('stage');
+        const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+        if (!config) throw new Error('Missing window.__MP_CONFIG__');
+        if (!canvas || !ctx) throw new Error('Canvas 2D context unavailable');
+        canvas.width = config.width;
+        canvas.height = config.height;
 
-    const audio = document.getElementById('audio');
-    audio.src = config.audio_url;
-    audio.crossOrigin = 'anonymous';
+        const lipPoints = [];
+        let lastMs = 0;
 
-    const lipPoints = [];
-    let lastMs = 0;
+        // Headless-safe renderer: drive animation purely from an internal clock.
+        // Audio is mixed later in ffmpeg, so we don't need to play it here.
+        const totalMs = Math.max(0, Number(config.total_ms || 0));
+        const startedAt = performance.now();
 
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    const source = audioCtx.createMediaElementSource(audio);
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
-    const data = new Uint8Array(analyser.fftSize);
-
-    function currentSegment(ms) {
-      const segs = config.script.segments || [];
-      for (const seg of segs) {
-        if (ms >= seg.start_ms && ms <= seg.end_ms) return seg;
+      function currentSegment(ms) {
+        const segs = (config.script && config.script.segments) ? config.script.segments : [];
+        for (const seg of segs) {
+          if (ms >= seg.start_ms && ms <= seg.end_ms) return seg;
+        }
+        return null;
       }
-      return null;
-    }
 
-    function drawFrame(open, seg, ms) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = config.chroma_key;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      function drawFrame(open, seg, ms) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = config.chroma_key;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const centerX = canvas.width * 0.5;
-      const centerY = canvas.height * 0.55;
-      const bob = Math.sin(ms / 300) * 4;
-      const headRadius = canvas.width * 0.18;
+      // Spec-ish layout: 16:9 canvas, avatar bottom-left, upper-body visible.
+      const bob = Math.sin(ms / 300) * 3;
+      const headRadius = Math.min(canvas.width, canvas.height) * 0.16;
+      const headX = canvas.width * 0.18;
+      const headY = canvas.height * 0.78;
       const bodyColor = config.avatar.body_color;
       const accentColor = config.avatar.accent_color;
       const mouthColor = config.avatar.mouth_color;
 
+      // Torso (extends below bottom so only upper part shows)
+      ctx.fillStyle = bodyColor;
+      const torsoW = headRadius * 2.0;
+      const torsoH = headRadius * 2.4;
+      ctx.fillRect(headX - torsoW * 0.55, headY + headRadius * 0.65 + bob, torsoW, torsoH);
+
       ctx.fillStyle = bodyColor;
       ctx.beginPath();
-      ctx.arc(centerX, centerY + bob, headRadius, 0, Math.PI * 2);
+      ctx.arc(headX, headY + bob, headRadius, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = accentColor;
       ctx.beginPath();
-      ctx.arc(centerX - headRadius * 0.5, centerY - headRadius * 0.4 + bob, headRadius * 0.18, 0, Math.PI * 2);
-      ctx.arc(centerX + headRadius * 0.5, centerY - headRadius * 0.4 + bob, headRadius * 0.18, 0, Math.PI * 2);
+      ctx.arc(headX - headRadius * 0.45, headY - headRadius * 0.35 + bob, headRadius * 0.18, 0, Math.PI * 2);
+      ctx.arc(headX + headRadius * 0.45, headY - headRadius * 0.35 + bob, headRadius * 0.18, 0, Math.PI * 2);
       ctx.fill();
 
       const mouthWidth = headRadius * 0.7;
       const mouthHeight = Math.max(4, headRadius * 0.15 * open);
       ctx.fillStyle = mouthColor;
-      ctx.fillRect(centerX - mouthWidth / 2, centerY + headRadius * 0.25 + bob, mouthWidth, mouthHeight);
+      ctx.fillRect(headX - mouthWidth / 2, headY + headRadius * 0.25 + bob, mouthWidth, mouthHeight);
 
-      if (seg) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `${Math.round(canvas.width * 0.04)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText(seg.emotion_tag || 'neutral', centerX, centerY - headRadius - 20 + bob);
-      }
-    }
-
-    function update() {
-      const ms = Math.round(audio.currentTime * 1000);
-      analyser.getByteTimeDomainData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) {
-        const v = (data[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / data.length);
-      const open = Math.min(1, Math.max(0.05, rms * 4));
-
-      if (ms !== lastMs) {
-        lipPoints.push({ t_ms: ms, open });
-        lastMs = ms;
+        if (seg) {
+          ctx.fillStyle = '#ffffff';
+          ctx.font = Math.round(canvas.width * 0.04) + 'px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText(seg.emotion_tag || 'neutral', Math.max(12, headX - headRadius), Math.max(24, headY - headRadius * 1.4 + bob));
+        }
       }
 
-      drawFrame(open, currentSegment(ms), ms);
-      if (!audio.paused) {
+      function mouthOpen(ms, seg) {
+        if (!seg) return 0.12;
+        // Simple deterministic pulse during speech segments.
+        const phase = ms / 85;
+        const base = 0.25;
+        const amp = 0.75;
+        return Math.min(1, Math.max(0.08, base + amp * (0.5 + 0.5 * Math.sin(phase))));
+      }
+
+      function update() {
+        const ms = Math.round(performance.now() - startedAt);
+        const seg = currentSegment(ms);
+        const open = mouthOpen(ms, seg);
+
+        if (ms !== lastMs) {
+          lipPoints.push({ t_ms: ms, open });
+          lastMs = ms;
+        }
+
+        drawFrame(open, seg, ms);
+        if (ms >= totalMs) {
+          window.__MP_LIP_SYNC__ = lipPoints;
+          window.__MP_DONE__ = true;
+          return;
+        }
         requestAnimationFrame(update);
       }
-    }
 
-    audio.addEventListener('play', () => {
-      audioCtx.resume();
-      requestAnimationFrame(update);
-    });
-
-    audio.addEventListener('ended', () => {
-      window.__MP_LIP_SYNC__ = lipPoints;
-      window.__MP_DONE__ = true;
-    });
-
-    window.__MP_START__ = async () => {
-      await audio.play();
+        requestAnimationFrame(update);
+      } catch (e) {
+        window.__MP_BOOT_ERROR__ = String((e && e.stack) ? e.stack : e);
+        window.__MP_DONE__ = true;
+        throw e;
+      }
     };
   </script>
 </body>
@@ -155,6 +163,7 @@ export async function renderSimpleCanvas(opts: {
     },
     script: opts.script,
     audio_url: audioUrl,
+    total_ms: opts.timing.total_ms + 1000,
   };
 
   const browser = await chromium.launch({
@@ -172,8 +181,19 @@ export async function renderSimpleCanvas(opts: {
   });
 
   const page = await context.newPage();
-  await page.addInitScript(`window.__MP_CONFIG__ = ${JSON.stringify(config)};`);
   await page.setContent(rendererHtml(), { waitUntil: 'load' });
+
+  // Inject config after content is loaded (more reliable than addInitScript for large JSON blobs).
+  await page.evaluate((cfg) => {
+    (window as any).__MP_CONFIG__ = cfg;
+  }, config);
+
+  const bootError = await page.evaluate(() => (window as any).__MP_BOOT_ERROR__ || null);
+  if (bootError) {
+    await context.close();
+    await browser.close();
+    throw new Error(`Renderer boot failed: ${bootError}`);
+  }
 
   await page.evaluate(() => (window as any).__MP_START__());
   const totalMs = opts.timing.total_ms + 1000;
@@ -192,7 +212,30 @@ export async function renderSimpleCanvas(opts: {
     throw new Error('No recorded webm produced by renderer');
   }
   const recorded = path.join(tmpDir, videoFiles[0]);
-  fs.copyFileSync(recorded, opts.outputWebm);
+
+  // Re-encode to keep overlay.webm reasonably small.
+  const tmpOut = `${opts.outputWebm}.tmp.webm`;
+  await runFfmpeg(
+    [
+      '-y',
+      '-i',
+      recorded,
+      '-an',
+      '-c:v',
+      'libvpx-vp9',
+      '-b:v',
+      '0',
+      '-crf',
+      '35',
+      '-pix_fmt',
+      'yuv420p',
+      '-r',
+      String(config.fps),
+      tmpOut,
+    ],
+    log
+  );
+  fs.renameSync(tmpOut, opts.outputWebm);
 
   const lipSync: LipSyncTimeline = {
     battle_id: opts.script.battle_id,

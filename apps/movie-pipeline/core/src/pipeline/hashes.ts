@@ -15,10 +15,12 @@ export async function hashLadm(project: ProjectRecord) {
 }
 
 export async function hashTts(project: ProjectRecord) {
-  if (!project.outputs.script_json) return '';
+  if (!project.outputs.script_json || !project.outputs.narration_timeline_json || !project.outputs.subtitle_timeline_json) return '';
   const scriptPath = projectArtifactPath(project.project_id, project.outputs.script_json);
   const parts: string[] = [];
   parts.push(await hashFile(scriptPath));
+  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.narration_timeline_json)));
+  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.subtitle_timeline_json)));
   const provider = project.settings.tts.provider;
   const ttsSettings =
     provider === 'google'
@@ -29,11 +31,10 @@ export async function hashTts(project: ProjectRecord) {
 }
 
 export async function hashLive2d(project: ProjectRecord) {
-  if (!project.outputs.script_timed_json || !project.outputs.tts_wav || !project.outputs.tts_timing_json) return '';
+  if (!project.outputs.script_json || !project.outputs.narration_timeline_json) return '';
   const parts: string[] = [];
-  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.script_timed_json)));
-  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.tts_wav)));
-  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.tts_timing_json)));
+  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.script_json)));
+  parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.narration_timeline_json)));
   parts.push(await hashString(JSON.stringify(project.settings.render)));
   parts.push(await hashString(String(project.inputs.character_id || 'builtin_simple')));
   return combine(parts);
@@ -45,8 +46,8 @@ export async function hashCompose(project: ProjectRecord) {
   if (project.outputs.overlay_webm) {
     parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.overlay_webm)));
   }
-  if (project.outputs.tts_wav) {
-    parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.tts_wav)));
+  if (project.outputs.tts_mp3) {
+    parts.push(await hashFile(projectArtifactPath(project.project_id, project.outputs.tts_mp3)));
   }
   if (project.inputs.bgm_mp3) {
     parts.push(await hashFile(project.inputs.bgm_mp3));

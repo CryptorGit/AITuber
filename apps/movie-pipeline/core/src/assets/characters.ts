@@ -25,7 +25,7 @@ export function listCharacters(): CharacterProfile[] {
   const root = charactersRoot();
   ensureDir(root);
   const entries = fs.readdirSync(root, { withFileTypes: true });
-  const out: CharacterProfile[] = [defaultCharacterProfile()];
+  const out: CharacterProfile[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const id = entry.name;
@@ -41,6 +41,11 @@ export function listCharacters(): CharacterProfile[] {
 
 export function loadCharacter(characterId: string | null | undefined): CharacterProfile {
   if (!characterId || characterId === 'builtin_simple') {
+    const maoPath = path.join(charactersRoot(), 'mao_pro_en', 'character.json');
+    if (fs.existsSync(maoPath)) {
+      const mao = readJson<CharacterProfile | null>(maoPath, null);
+      if (mao) return { ...mao, character_id: mao.character_id || 'mao_pro_en' };
+    }
     return defaultCharacterProfile();
   }
   const profilePath = path.join(charactersRoot(), characterId, 'character.json');

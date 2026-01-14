@@ -6,6 +6,7 @@ export type TsEvent = {
   turn?: number | null;
   type?: string | null;
   text?: string | null;
+  meta?: Record<string, any> | null;
 };
 
 export type TsLogInfo = {
@@ -15,12 +16,31 @@ export type TsLogInfo = {
 
 function normalizeEvent(obj: any): TsEvent | null {
   if (!obj) return null;
-  const tMs = Number(obj.t_ms ?? obj.t ?? obj.timestamp_ms ?? obj.time_ms);
-  if (!Number.isFinite(tMs)) return null;
+
+  // Source-of-Truth schema: `t` is seconds from start of input_battle.
+  // Legacy/other schemas may provide ms in `t_ms`, `timestamp_ms`, etc.
+  const rawMs = obj.t_ms ?? obj.timestamp_ms ?? obj.time_ms;
+  const rawT = obj.t;
+
+  let tMs: number | null = null;
+  if (rawMs !== undefined && rawMs !== null) {
+    const v = Number(rawMs);
+    if (Number.isFinite(v)) tMs = v;
+  } else if (rawT !== undefined && rawT !== null) {
+    const v = Number(rawT);
+    if (Number.isFinite(v)) {
+      // Heuristic: if it's a small number, treat as seconds; otherwise assume ms.
+      tMs = v < 10000 ? Math.round(v * 1000) : Math.round(v);
+    }
+  }
+
+  if (tMs == null || !Number.isFinite(tMs)) return null;
   const turn = obj.turn != null ? Number(obj.turn) : null;
-  const type = obj.type ? String(obj.type) : null;
+  const type = obj.event_type ? String(obj.event_type) : obj.type ? String(obj.type) : null;
   const text = obj.text ? String(obj.text) : null;
-  return { t_ms: tMs, turn: Number.isFinite(turn) ? turn : null, type, text };
+
+  const meta = obj.meta && typeof obj.meta === 'object' ? (obj.meta as Record<string, any>) : null;
+  return { t_ms: tMs, turn: Number.isFinite(turn) ? turn : null, type, text, meta };
 }
 
 export function parseTsLog(filePath: string): TsLogInfo {

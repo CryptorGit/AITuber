@@ -9,6 +9,7 @@ type DetailResponse = {
 
 type ExportJob = {
   battle_id: string;
+  job_id?: string;
   status: 'queued' | 'running' | 'done' | 'failed';
   progress?: number;
   message?: string;
@@ -40,8 +41,12 @@ export default function ReplayDetailPage() {
   // poll export status while queued/running
   useEffect(() => {
     if (!job || (job.status !== 'queued' && job.status !== 'running')) return;
+    const jobId = job.job_id;
     const t = setInterval(() => {
-      fetch(`/api/export/status?battle_id=${encodeURIComponent(decodedBattleId)}`)
+      const url = jobId
+        ? `/api/export/status?job_id=${encodeURIComponent(jobId)}`
+        : `/api/export/status?battle_id=${encodeURIComponent(decodedBattleId)}`;
+      fetch(url)
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => j && setJob(j))
         .catch(() => {});
@@ -69,7 +74,7 @@ export default function ReplayDetailPage() {
               <button
                 onClick={() => {
                   setJobErr('');
-                  apiPost<ExportJob>('/api/export', { battle_id: decodedBattleId })
+                  apiPost<ExportJob>('/api/export', { battle_id: decodedBattleId, black_battle_text_overlay: subtitles })
                     .then((j) => setJob(j))
                     .catch((e) => setJobErr(String(e?.message ?? e)));
                 }}

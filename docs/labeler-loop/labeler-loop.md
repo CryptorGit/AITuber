@@ -1,36 +1,53 @@
-# labeler-loop (骭ｲ髻ｳ竊担TT竊貞呵｣・竊帝∈謚樞・菫晏ｭ・
+# labeler-loop（音声→STT→候補生成→ラベリング）
 
-縺薙・繧ｵ繝悶い繝励Μ縺ｯ縲碁鹸髻ｳ繝懊ち繝ｳ荳ｭ蠢・・繝・・繧ｿ蜿朱寔Web繧ｵ繝ｼ繝舌阪〒縺吶・
+`apps/labeler-loop/` は、音声入力から
 
-- AITuber 譛ｬ菴薙→縺ｯ蛻・屬縺励※ `apps/labeler-loop/` 縺ｫ驟咲ｽｮ縺励※縺・∪縺・
-- 遘伜ｯ・ュ蝣ｱ縺ｯ繧ｳ繝溘ャ繝医＠縺ｾ縺帙ｓ・・.env/` 縺・gitignored・・
-- 蜷・ち繝ｼ繝ｳ縺ｧ縲悟呵｣・縺､縲阪悟享縺｡1縺､縲阪瑚ｲ縺・縺､縲阪ｒ JSONL 縺ｧ蠢・★菫晏ｭ倥＠縺ｾ縺・
+1) 音声を `wav (16kHz, mono, Linear16)` に変換
+2) Speech-to-Text で文字起こし
+3) Gemini で候補テキストを生成
+4) Web UI で「どの候補が良いか」を選び、理由タグ付きで `labels.jsonl` に保存
 
-## 讒区・
+…というループを回すための小さなツールです。
 
-- 繧ｵ繝ｼ繝・ `apps/labeler-loop/app.py`・・astAPI・・
-- UI: `web/labeler-loop/`・・逕ｻ髱｢・・
-- 繝・・繧ｿ: `data/labeler-loop/`・・labels.jsonl`, 髻ｳ螢ｰ繝輔ぃ繧､繝ｫ遲会ｼ・
+## ディレクトリ
 
-## 蜑肴署
+- サーバ: `apps/labeler-loop/app.py`（FastAPI）
+- UI: `web/labeler-loop/`
+- データ: `data/labeler-loop/`
+	- `labels.jsonl`
+	- `audio/`
 
-- Python 3.10+・域耳螂ｨ 3.11 / 3.13 縺ｧ繧ょ庄・・
-- ffmpeg・磯浹螢ｰ繧・`wav (Linear16, 16kHz, mono)` 縺ｫ螟画鋤縺吶ｋ縺溘ａ蠢・茨ｼ・
-- Google Cloud 隱崎ｨｼ・・peech-to-Text・・
-- Gemini API Key・亥呵｣懃函謌撰ｼ・
+## 前提
 
-### ffmpeg (Windows)
+- Python 3.11+（プロジェクト全体の venv と共通）
+- `ffmpeg`（音声変換）
+- Google Cloud 認証（Speech-to-Text を使う場合）
+- Gemini API Key（候補生成を使う場合）
+
+## .env（最低限）
+
+`.env/` から読み込みます。
+
+- `GOOGLE_APPLICATION_CREDENTIALS` : Speech-to-Text 用サービスアカウント JSON
+- `GEMINI_API_KEY`（または `GOOGLE_API_KEY`）: Gemini API Key
+- `FFMPEG_PATH` : `ffmpeg.exe` へのフルパス（PATH 未設定の場合）
+
+## 起動
+
+```powershell
+cd C:\Users\crypt\source\repos\CryptorGit\AITuber
+cd .
 
 - winget: `winget install Gyan.FFmpeg`
-- 縺ｾ縺溘・ Chocolatey: `choco install ffmpeg`
+- 縺セ縺溘・ Chocolatey: `choco install ffmpeg`
 
-繧､繝ｳ繧ｹ繝医・繝ｫ蠕後～ffmpeg -version` 縺碁壹ｋ縺薙→繧堤｢ｺ隱阪＠縺ｦ縺上□縺輔＞縲・
+繧、繝ウ繧ケ繝医・繝ォ蠕後€~ffmpeg -version` 縺碁€壹k縺薙→繧堤「コ隱阪@縺ヲ縺上□縺輔>縲・
 
-PATH 繧偵＞縺倥ｊ縺溘￥縺ｪ縺・ｴ蜷医・縲～.env/.env.labeler-loop` 縺ｫ `FFMPEG_PATH`・・ffmpeg.exe` 縺ｮ繝輔Ν繝代せ・峨ｒ險ｭ螳壹〒縺阪∪縺吶・
+PATH 繧偵>縺倥j縺溘¥縺ェ縺・エ蜷医・縲~.env/.env.labeler-loop` 縺ォ `FFMPEG_PATH`・・ffmpeg.exe` 縺ョ繝輔Ν繝代せ・峨r險ュ螳壹〒縺阪∪縺吶€・
 
-## 繧ｻ繝・ヨ繧｢繝・・
+## 繧サ繝・ヨ繧「繝・・
 
-縺薙・繝ｪ繝昴ず繝医Μ縺ｯ萓晏ｭ倥ｒ繝ｫ繝ｼ繝医・ [requirements.txt](requirements.txt) 縺ｫ邨ｱ蜷医＠縺ｦ縺・∪縺吶・
+縺薙・繝ェ繝昴ず繝医Μ縺ッ萓晏ュ倥r繝ォ繝シ繝医・ [requirements.txt](requirements.txt) 縺ォ邨ア蜷医@縺ヲ縺・∪縺吶€・
 
 ```powershell
 cd C:\Users\crypt\source\repos\CryptorGit\AITuber
@@ -38,15 +55,15 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-## 迺ｰ蠅・､画焚・・env・・
+## 迺ー蠅・、画焚・・env・・
 
-`.env/.env.labeler-loop` 繧剃ｽ懈・縺励※蛟､繧貞・繧後※縺上□縺輔＞縲・
+`.env/.env.labeler-loop` 繧剃ス懈・縺励※蛟、繧貞・繧後※縺上□縺輔>縲・
 
-- `GOOGLE_APPLICATION_CREDENTIALS` : Speech-to-Text 逕ｨ縺ｮ繧ｵ繝ｼ繝薙せ繧｢繧ｫ繧ｦ繝ｳ繝・SON縺ｸ縺ｮ繝代せ
-- `GEMINI_API_KEY` : Gemini 縺ｮ API 繧ｭ繝ｼ・・oogle AI Studio 遲会ｼ・
-- `FFMPEG_PATH` : 莉ｻ諢擾ｼ・ffmpeg.exe` 縺ｮ繝輔Ν繝代せ・・
+- `GOOGLE_APPLICATION_CREDENTIALS` : Speech-to-Text 逕ィ縺ョ繧オ繝シ繝薙せ繧「繧ォ繧ヲ繝ウ繝・SON縺ク縺ョ繝代せ
+- `GEMINI_API_KEY` : Gemini 縺ョ API 繧ュ繝シ・・oogle AI Studio 遲会シ・
+- `FFMPEG_PATH` : 莉サ諢擾シ・ffmpeg.exe` 縺ョ繝輔Ν繝代せ・・
 
-## 襍ｷ蜍・
+## 襍キ蜍・
 
 ```powershell
 cd C:\Users\crypt\source\repos\CryptorGit\AITuber
@@ -54,23 +71,23 @@ $env:PYTHONUTF8 = "1"
 .\.venv\Scripts\python.exe -m uvicorn app:app --app-dir "C:\Users\crypt\source\repos\CryptorGit\AITuber\apps\labeler-loop" --reload --host 127.0.0.1 --port 7861
 ```
 
-繝悶Λ繧ｦ繧ｶ縺ｧ `http://127.0.0.1:7861/` 繧帝幕縺阪∪縺吶・
+繝悶Λ繧ヲ繧カ縺ァ `http://127.0.0.1:7861/` 繧帝幕縺阪∪縺吶€・
 
-## 謇句虚繝・せ繝域焔鬆・ｼ・縺､・・
+## 謇句虚繝・せ繝域焔鬆・シ・縺、・・
 
-1) 骭ｲ髻ｳ竊担TT竊貞呵｣懌・驕ｸ謚樞・菫晏ｭ倥′1蝗樣壹ｋ
-- [骭ｲ髻ｳ髢句ｧ犠竊定ｩｱ縺吮・[骭ｲ髻ｳ蛛懈ｭ｢]
-- STT縺後ユ繧ｭ繧ｹ繝医・繝・け繧ｹ縺ｫ蜃ｺ繧・
-- 蛟呵｣懊′5縺､蜃ｺ繧・
-- 1縺､驕ｸ繧薙〒[騾∽ｿ｡]
-- `data/labeler-loop/labels.jsonl` 縺ｫ1陦悟｢励∴繧・
+1) 骭イ髻ウ竊担TT竊貞€呵」懌・驕ク謚樞・菫晏ュ倥′1蝗樣€壹k
+- [骭イ髻ウ髢句ァ犠竊定ゥア縺吮・[骭イ髻ウ蛛懈ュ「]
+- STT縺後ユ繧ュ繧ケ繝医・繝・け繧ケ縺ォ蜃コ繧・
+- 蛟呵」懊′5縺、蜃コ繧・
+- 1縺、驕ク繧薙〒[騾∽ソ。]
+- `data/labeler-loop/labels.jsonl` 縺ォ1陦悟「励∴繧・
 
-2) 騾｣邯壹〒5繧ｿ繝ｼ繝ｳ蝗槭＠縺ｦ labels.jsonl 縺悟｢励∴繧・
-- 荳翫ｒ5蝗樒ｹｰ繧願ｿ斐☆
-- `labels.jsonl` 縺ｮ陦梧焚縺・蠅励∴繧・
-- 蜷・｡後↓ candidates(5) 縺ｨ winner_index 縺後≠繧・
+2) 騾」邯壹〒5繧ソ繝シ繝ウ蝗槭@縺ヲ labels.jsonl 縺悟「励∴繧・
+- 荳翫r5蝗樒ケー繧願ソ斐☆
+- `labels.jsonl` 縺ョ陦梧焚縺・蠅励∴繧・
+- 蜷・。後↓ candidates(5) 縺ィ winner_index 縺後≠繧・
 
-3) JSON蟠ｩ繧・髻ｳ螢ｰ螟画鋤螟ｱ謨玲凾縺ｫUI縺ｫ繧ｨ繝ｩ繝ｼ縺悟・縺ｦ菫晏ｭ倥＆繧後↑縺・
-- `ffmpeg` 繧単ATH縺九ｉ螟悶☆・医∪縺溘・蟄伜惠縺励↑縺・憾諷九〒襍ｷ蜍包ｼ俄・骭ｲ髻ｳ蛛懈ｭ｢
-- UI縺ｫ繧ｨ繝ｩ繝ｼ縺悟・縺ｦ candidates 縺悟・縺ｪ縺・
-- [騾∽ｿ｡]縺励※繧ゆｿ晏ｭ倥＆繧後↑縺・ｼ・labels.jsonl` 縺悟｢励∴縺ｪ縺・ｼ・
+3) JSON蟠ゥ繧・髻ウ螢ー螟画鋤螟ア謨玲凾縺ォUI縺ォ繧ィ繝ゥ繝シ縺悟・縺ヲ菫晏ュ倥&繧後↑縺・
+- `ffmpeg` 繧単ATH縺九i螟悶☆・医∪縺溘・蟄伜惠縺励↑縺・憾諷九〒襍キ蜍包シ俄・骭イ髻ウ蛛懈ュ「
+- UI縺ォ繧ィ繝ゥ繝シ縺悟・縺ヲ candidates 縺悟・縺ェ縺・
+- [騾∽ソ。]縺励※繧ゆソ晏ュ倥&繧後↑縺・シ・labels.jsonl` 縺悟「励∴縺ェ縺・シ・

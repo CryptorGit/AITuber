@@ -13,8 +13,10 @@ export function resolvePpoRolloutLen(): PpoRolloutLenConfig {
   const raw = String(process.env.PPO_ROLLOUT_LEN ?? '').trim();
   const has = raw.length > 0;
 
-  // Keep existing behavior default.
-  const DEFAULT = 256;
+  // Default PPO update frequency for the vgc-demo trainer.
+  // This is in *decision steps* (not turns): we train after collecting this many
+  // action selections from the learner.
+  const DEFAULT = 5048;
 
   const srcHint = String(process.env.PPO_ROLLOUT_LEN_SOURCE ?? '').trim().toLowerCase();
   const hinted = srcHint === 'cli' ? 'cli' : srcHint ? 'unknown' : null;
@@ -24,7 +26,8 @@ export function resolvePpoRolloutLen(): PpoRolloutLenConfig {
   }
 
   const parsed = Number(raw);
-  const v = clampInt(parsed, 8, 4096);
+  // Allow the configured value to exceed the old 4096 cap.
+  const v = clampInt(parsed, 8, 8192);
 
   // If a hint exists (e.g., set by PowerShell runner), respect it.
   if (hinted) return { value: v, source: hinted, raw };

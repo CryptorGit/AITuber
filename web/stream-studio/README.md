@@ -1,53 +1,45 @@
+# web/stream-studio (Stage / Console)
+
+`apps/stream-studio` の FastAPI サーバが提供する **Web UI** です。
+
+- `http://127.0.0.1:8000/console`
+  - 入力（手動/将来拡張）
+  - VLM フレーム送信（`/vlm/frame`）
+  - STT 送信（`/stt/text`）
+  - 生成候補の承認/却下（`/manager/approve` / `/manager/reject`）
+
+- `http://127.0.0.1:8000/stage`
+  - OBS Browser Source 向けオーバーレイ
+  - 字幕（`/overlay_text`）と音声（TTS）を表示/再生
+  - Live2D/VTube Studio モーションをトリガー
+
+## Live2D (Web)
+
+- VTube Studio 側の接続設定は `config/stream-studio/live2d_hotkeys.yaml` と `.env`（`AITUBER_VTUBE_AUTH_TOKEN` など）を参照。
+- Stage は承認時に `motion_tags` に応じてホットキーを発火します。
+
 # web/ (Stage / Console)
 
-縺薙・繝・ぅ繝ｬ繧ｯ繝医Μ縺ｯ FastAPI 縺九ｉ髱咏噪驟堺ｿ｡縺輔ｌ繧・**Web UI** 縺ｧ縺吶・
+縺薙・繝・ぅ繝ャ繧ッ繝医Μ縺ッ FastAPI 縺九i髱咏噪驟堺ソ。縺輔l繧・**Web UI** 縺ァ縺吶€・
 
-- `http://127.0.0.1:8000/console` : Manager Console・医ョ繝舌う繧ｹ驕ｸ謚・/ STT / 蛟呵｣懈価隱・/ 繝｢繝ｼ繧ｷ繝ｧ繝ｳ逋ｺ轣ｫ・・
-- `http://127.0.0.1:8000/stage` : Stage・・BS Browser Source 逕ｨ縲∝ｭ怜ｹ・+ Live2D + TTS 蜀咲函・・
+- `http://127.0.0.1:8000/console` : Manager Console・医ョ繝舌う繧ケ驕ク謚・/ STT / 蛟呵」懈価隱・/ 繝「繝シ繧キ繝ァ繝ウ逋コ轣ォ・・
+- `http://127.0.0.1:8000/stage` : Stage・・BS Browser Source 逕ィ縲∝ュ怜ケ・+ Live2D + TTS 蜀咲函・・
 
-## Live2D (Web) 縺ｮ蜑肴署
+## Live2D (Web) 縺ョ蜑肴署
 
-譛ｬMVP縺ｯ **Cubism 4 邉ｻ縺ｮ繝｢繝・Ν・・.model3.json` / `.motion3.json`・・* 繧呈Φ螳壹＠縺ｾ縺吶・
+譛ャMVP縺ッ **Cubism 4 邉サ縺ョ繝「繝・Ν・・.model3.json` / `.motion3.json`・・* 繧呈Φ螳壹@縺セ縺吶€・
 
-### 1) Cubism Core 縺ｮ逕ｨ諢擾ｼ亥ｿ・茨ｼ・
+### 1) Cubism Core 縺ョ逕ィ諢擾シ亥ソ・茨シ・
 
-`pixi-live2d-display`・・DN迚茨ｼ峨〒 Cubism 4 繝｢繝・Ν繧呈緒逕ｻ縺吶ｋ縺ｫ縺ｯ `live2dcubismcore.min.js` 縺悟ｿ・ｦ√〒縺吶・
+`pixi-live2d-display`・・DN迚茨シ峨〒 Cubism 4 繝「繝・Ν繧呈緒逕サ縺吶k縺ォ縺ッ `live2dcubismcore.min.js` 縺悟ソ・ヲ√〒縺吶€・
 
-- 蜈ｬ蠑・Cubism SDK for Web 縺九ｉ `live2dcubismcore.min.js` 繧貞叙繧雁・縺励∵ｬ｡縺ｮ蝣ｴ謇縺ｫ驟咲ｽｮ縺励※縺上□縺輔＞:
+- 蜈ャ蠑・Cubism SDK for Web 縺九i `live2dcubismcore.min.js` 繧貞叙繧雁・縺励€∵ャ。縺ョ蝣エ謇€縺ォ驟咲スョ縺励※縺上□縺輔>:
   - `web/vendor/live2dcubismcore.min.js`
 
-豕ｨ諢・
-- 縺薙・繝ｪ繝昴ず繝医Μ縺ｫ縺ｯ Live2D SDK / Core 縺ｯ蜷梧｢ｱ縺励∪縺帙ｓ・医Λ繧､繧ｻ繝ｳ繧ｹ縺ｫ豕ｨ諢擾ｼ峨・
+豕ィ諢・
+- 縺薙・繝ェ繝昴ず繝医Μ縺ォ縺ッ Live2D SDK / Core 縺ッ蜷梧「ア縺励∪縺帙s・医Λ繧、繧サ繝ウ繧ケ縺ォ豕ィ諢擾シ峨€・
 
-### 2) 繝｢繝・Ν驟咲ｽｮ
+### 2) 繝「繝・Ν驟咲スョ
 
-`data/stream-studio/web/models/<name>/` 驟堺ｸ九↓繝｢繝・Ν繧帝・鄂ｮ縺励※縺上□縺輔＞・医し繝ｼ繝舌・縺・`/models` 縺ｨ縺励※驟堺ｿ｡縺励∪縺呻ｼ峨・
+`data/stream-studio/web/models/<name>/` 驟堺ク九↓繝「繝・Ν繧帝・鄂ョ縺励※縺上□縺輔>・医し繝シ繝舌・縺・`/models` 縺ィ縺励※驟堺ソ。縺励∪縺呻シ峨€・
 
-萓・
-- `data/stream-studio/web/models/haru/haru.model3.json`
-- `data/stream-studio/web/models/haru/motions/01_greet.motion3.json`
-
-Stage 蛛ｴ縺ｯ繝・ヵ繧ｩ繝ｫ繝医〒谺｡縺ｮURL繧定ｪｭ縺ｿ縺ｫ縺・″縺ｾ縺・
-- `/models/<name>/<name>.model3.json`
-
-Console 縺ｮ縲鍬ive2D 繝｢繝・Ν蜷阪阪後Δ繝・Ν繝輔ぃ繧､繝ｫ蜷阪阪〒螟画峩縺ｧ縺阪∪縺呻ｼ・ocalStorage 縺ｫ菫晏ｭ假ｼ峨・
-
-### 3) hotkeys.json
-
-`web/stream-studio/hotkeys.json` 縺ｯ `motion_tags -> motion file path` 縺ｮ霎樊嶌縺ｧ縺吶・
-
-萓・
-```json
-{
-  "greet": "motions/01_greet.motion3.json",
-  "smile": "motions/02_smile.motion3.json"
-}
-```
-
-- 蛟､縺ｯ `.model3.json` 蜀・・ `FileReferences.Motions` 縺ｫ縺ゅｋ `File` 縺ｨ荳閾ｴ縺吶ｋ逶ｸ蟇ｾ繝代せ繧呈耳螂ｨ縺励∪縺吶・
-
-## 繧ｻ繧ｭ繝･繝ｪ繝・ぅ/繝励Λ繧､繝舌す繝ｼ
-
-- 繝悶Λ繧ｦ繧ｶ縺ｯ逕ｻ蜒上ヵ繝ｬ繝ｼ繝・・PEG・峨ｄ繝・く繧ｹ繝医ｒ **繧ｵ繝ｼ繝舌↓騾√ｋ縺縺・* 縺ｧ縺吶・
-- Gemini/VLM/TTS 縺ｮ API 繧ｭ繝ｼ遲峨・繝悶Λ繧ｦ繧ｶ縺ｸ髴ｲ蜃ｺ縺励∪縺帙ｓ縲・
-- 繧ｵ繝ｼ繝舌・蜿嶺ｿ｡縺励◆繝輔Ξ繝ｼ繝逕ｻ蜒上ｒ菫晏ｭ倥＠縺ｾ縺帙ｓ・郁ｦ∫ｴ・ユ繧ｭ繧ｹ繝医・縺ｿ繝ｭ繧ｰ/遏ｭ譛欒AG縺ｫ蜈･繧翫∪縺呻ｼ峨・

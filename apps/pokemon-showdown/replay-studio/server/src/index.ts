@@ -890,10 +890,16 @@ async function generateBattleLog(record: any) {
 async function getOrCreateBattleLog(trainDirName: string, battleId: string) {
   const logPath = path.join(generatedLogsRoot, `${battleId}.log`);
   if (fs.existsSync(logPath)) {
-    const cached = fs.readFileSync(logPath, 'utf8');
-    const hasProgress = cached.includes('\n|turn|') || cached.includes('\n|win|') || cached.includes('\n|tie|');
-    // If a cached log never progressed beyond pre-battle lines, regenerate.
-    if (hasProgress) return cached;
+    // NOTE: On Windows, it's possible for another process/script to delete the file
+    // between existsSync() and readFileSync(). Treat ENOENT as a cache miss.
+    try {
+      const cached = fs.readFileSync(logPath, 'utf8');
+      const hasProgress = cached.includes('\n|turn|') || cached.includes('\n|win|') || cached.includes('\n|tie|');
+      // If a cached log never progressed beyond pre-battle lines, regenerate.
+      if (hasProgress) return cached;
+    } catch (e: any) {
+      if (String(e?.code ?? '') !== 'ENOENT') throw e;
+    }
   }
 
   const record = await findReplayRecord(trainDirName, battleId);
@@ -904,6 +910,8 @@ async function getOrCreateBattleLog(trainDirName: string, battleId: string) {
   }
 
   const logText = await generateBattleLog(record);
+  // Re-ensure directory at write-time so cache writes don't fail if a cleanup script removed it.
+  ensureDir(generatedLogsRoot);
   fs.writeFileSync(logPath, logText, 'utf8');
   return logText;
 }
@@ -1211,7 +1219,7 @@ async function resolveFfmpegPath() {
   return 'ffmpeg';
 }
 
-async function runExportJob(opts: { battleId: string; jobId: string; port: number }) {
+async function runExportJob(opts: { battleId: string; jobId: string; port: number; blackBattleTextOverlay: boolean }) {
   let playwright: any;
   try {
     playwright = await import('playwright');
@@ -1619,7 +1627,11 @@ async function runExportJob(opts: { battleId: string; jobId: string; port: numbe
 
   // For export, do NOT autoplay. We want to confirm layout/assets are ready before starting playback.
   // User requirement: export playback at "Really Slow" speed.
-  const url = `http://127.0.0.1:${opts.port}/viewer/${encodeURIComponent(opts.battleId)}?export=1&embed=1&autoplay=0&speed=reallyslow&subtitles=0`;
+  const subtitles = opts.blackBattleTextOverlay ? 1 : 0;
+  const url = `http://127.0.0.1:${opts.port}/viewer/${encodeURIComponent(opts.battleId)}?export=1&embed=1&autoplay=0&speed=reallyslow&subtitles=${subtitles}`;
+
+  // Helpful for smoke checks: shows whether the export is rendering with/without the overlay.
+  writeJob(opts.jobId, { viewer_url: url });
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   // Wait for replay-embed.js to initialize the battle.
@@ -2570,7 +2582,8 @@ app.post('/api/export', async (req, res) => {
   }
 
   const battleId = String(body.battle_id);
-  const jobId = battleId;
+  const blackBattleTextOverlay = Boolean(body.black_battle_text_overlay);
+  const jobId = `${battleId}-${blackBattleTextOverlay ? 'sub1' : 'sub0'}`;
 
   const existing = readJob(jobId);
   if (existing?.status === 'running' || existing?.status === 'queued') {
@@ -2578,6 +2591,8 @@ app.post('/api/export', async (req, res) => {
   }
 
   writeJob(jobId, {
+    battle_id: battleId,
+    job_id: jobId,
     status: 'queued',
     progress: 0,
     message: 'Queued',
@@ -2606,7 +2621,7 @@ app.post('/api/export', async (req, res) => {
 
   const port = Number(process.env.PORT ?? 8787);
   setTimeout(() => {
-    runExportJob({ battleId, jobId, port }).catch((e: any) => {
+    runExportJob({ battleId, jobId, port, blackBattleTextOverlay }).catch((e: any) => {
       writeJob(jobId, { status: 'failed', progress: 1, message: String(e?.message ?? e), finished_at: new Date().toISOString() });
     });
   }, 10);
@@ -2615,9 +2630,11 @@ app.post('/api/export', async (req, res) => {
 });
 
 app.get('/api/export/status', (req, res) => {
+  const jobId = String(req.query.job_id ?? '');
   const battleId = String(req.query.battle_id ?? '');
-  if (!battleId) return res.status(400).json({ error: 'battle_id required' });
-  const job = readJob(battleId);
+  const id = jobId || battleId;
+  if (!id) return res.status(400).json({ error: 'job_id or battle_id required' });
+  const job = readJob(id);
   if (!job) return res.status(404).json({ error: 'no job' });
   res.json(job);
 });

@@ -85,4 +85,7 @@ export const trainSettingsSchema = z.object({
 
 export const exportRequestSchema = z.object({
   battle_id: z.string().min(1),
+  // When true, include the in-battle messagebar text overlay (a black text bar) in the rendered/exported video.
+  // This maps to the viewer query param `subtitles=1`.
+  black_battle_text_overlay: z.boolean().default(false),
 });

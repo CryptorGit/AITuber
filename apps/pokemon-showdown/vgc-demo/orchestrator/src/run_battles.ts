@@ -1,5 +1,5 @@
-import { mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 
 import { appendJsonl, appendJsonlGz } from './io/jsonl';
 import { extractRequestFeatures } from './learn/obs_features';
@@ -19,6 +19,50 @@ import * as TeamsMod from '../../../../../tools/pokemon-showdown/pokemon-showdow
 
 const Teams: any = (TeamsMod as any).default?.Teams ?? (TeamsMod as any).Teams ?? (TeamsMod as any).default;
 const DEBUG = process.env.VGC_DEMO_DEBUG === '1';
+
+type MatchCounter = {
+  next_match_index: number;
+};
+
+function readMatchCounter(counterPath: string): MatchCounter {
+  try {
+    if (!existsSync(counterPath)) return { next_match_index: 0 };
+    const raw = readFileSync(counterPath, 'utf8');
+    const j = JSON.parse(raw);
+    const next = Number(j?.next_match_index ?? 0);
+    return { next_match_index: Number.isFinite(next) && next >= 0 ? Math.trunc(next) : 0 };
+  } catch {
+    return { next_match_index: 0 };
+  }
+}
+
+function writeMatchCounter(counterPath: string, c: MatchCounter): void {
+  const next = Number.isFinite(c.next_match_index) && c.next_match_index >= 0 ? Math.trunc(c.next_match_index) : 0;
+  const tmp = `${counterPath}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ next_match_index: next }, null, 2), 'utf8');
+  rmSync(counterPath, { force: true });
+  renameSync(tmp, counterPath);
+}
+
+function reserveMatchRange(outDir: string, nBattles: number): number {
+  const n = Math.max(0, Math.trunc(Number(nBattles) || 0));
+  if (!n) return 0;
+  const counterPath = join(outDir, '_match_counter.json');
+  const c = readMatchCounter(counterPath);
+  const start0 = c.next_match_index;
+  c.next_match_index = start0 + n;
+  writeMatchCounter(counterPath, c);
+  return start0;
+}
+
+function resolveMatchCounterDir(runOutDir: string): string {
+  const b = basename(runOutDir).toLowerCase();
+  // Training runs write outputs under data/pokemon-showdown/vgc-demo/train_*.
+  // The match counter should live in the stable vgc-demo root so it increments
+  // across runs.
+  if (b.startsWith('train_')) return resolve(runOutDir, '..');
+  return runOutDir;
+}
 
 function isPpoPolicy(p: string): boolean {
   const s = String(p ?? '').trim();
@@ -150,6 +194,11 @@ export async function runBattlesChunk(opts: {
   const data = loadTeamGenData();
   const appendSave = getAppendSave(opts.saveCfg.compress);
 
+  // Reserve match indices up-front so the per-battle IDs are unique across
+  // multiple runs/chunks (even if the process crashes mid-chunk).
+  // match_index is 1-based.
+  const matchStart0 = reserveMatchRange(resolveMatchCounterDir(opts.paths.outDir), opts.nBattles);
+
   const rows: JsonRow[] = [];
   const battleIds: string[] = [];
   const trajectoryRows: JsonRow[] = [];
@@ -175,7 +224,10 @@ export async function runBattlesChunk(opts: {
   for (let i = 0; i < opts.nBattles; i++) {
     const globalIndex = opts.startBattleIndex + i;
     const battleSeed = opts.seedBase + i + 1;
-    const battleId = `${opts.runId}-${globalIndex}`;
+    const matchIndex = matchStart0 + i + 1;
+    const matchTag = `m${String(matchIndex).padStart(7, '0')}`;
+    const battleIdBase = `${opts.runId}-${globalIndex}`;
+    const battleId = `${battleIdBase}-${matchTag}`;
     battleIds.push(battleId);
 
     const startedAt = isoNow();
@@ -371,6 +423,8 @@ export async function runBattlesChunk(opts: {
         run_id: opts.runId,
         battle_index: globalIndex,
         battle_id: battleId,
+        battle_id_base: battleIdBase,
+        match_index: matchIndex,
         seed: battleSeed,
         format: opts.formatId,
         started_at: startedAt,
@@ -420,6 +474,8 @@ export async function runBattlesChunk(opts: {
           run_id: opts.runId,
           battle_index: globalIndex,
           battle_id: battleId,
+          battle_id_base: battleIdBase,
+          match_index: matchIndex,
           format: opts.formatId,
           seed: battleSeed,
           start_seed: [battleSeed, battleSeed + 1, battleSeed + 2, battleSeed + 3],
@@ -472,6 +528,8 @@ export async function runBattlesChunk(opts: {
             run_id: opts.runId,
             battle_index: globalIndex,
             battle_id: battleId,
+            battle_id_base: battleIdBase,
+            match_index: matchIndex,
             format: opts.formatId,
             seed: battleSeed,
             player: d.player,
@@ -520,6 +578,8 @@ export async function runBattlesChunk(opts: {
         run_id: opts.runId,
         battle_index: globalIndex,
         battle_id: battleId,
+        battle_id_base: battleIdBase,
+        match_index: matchIndex,
         seed: battleSeed,
         format: opts.formatId,
         started_at: startedAt,
@@ -549,6 +609,8 @@ export async function runBattlesChunk(opts: {
       appendJsonl(opts.paths.errorsPath, {
         battle_index: globalIndex,
         battle_id: battleId,
+        battle_id_base: battleIdBase,
+        match_index: matchIndex,
         error_type: String(e?.name ?? 'Error'),
         error: errStack || errMessage,
       });

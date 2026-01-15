@@ -244,7 +244,7 @@ async function main() {
   const seed = Number(args['seed'] ?? '0');
 
   // PPO state (optional).
-  const ppoRolloutLen = clampInt(Number(process.env.PPO_ROLLOUT_LEN ?? '256'), 8, 4096);
+  const ppoRolloutLen = clampInt(Number(process.env.PPO_ROLLOUT_LEN ?? '5048'), 8, 8192);
   const ppoEnabled = isPpoPolicy(p1Policy) || isPpoPolicy(p2Policy);
   const ppoClient = ppoEnabled ? new PpoClient(pythonUrl) : null;
   const ppoStats = ppoClient ? new PpoRunStats() : null;

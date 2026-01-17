@@ -53,7 +53,21 @@ $pythonProc = $null
 $pythonOutLog = $null
 $pythonErrLog = $null
 
+function Test-LocalPortInUse {
+  param([int]$Port)
+  try {
+    $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    return [bool]$c
+  } catch {
+    return $false
+  }
+}
+
 try {
+  if (Test-LocalPortInUse -Port $PythonPort) {
+    throw "PythonPort $PythonPort is already in use. Stop the process listening on that port or re-run with -PythonPort <free_port>."
+  }
+
   Write-Host "[vgc-train] Starting Python policy+trainer server..."
   Push-Location $agentDir
   if (-not (Test-Path ".venv")) {

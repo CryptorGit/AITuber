@@ -122,6 +122,7 @@ export type RunPaths = {
   battlesPath: string;
   summaryPath: string;
   errorsPath: string;
+  invalidsPath: string;
   debugPath: string;
   trajectoriesPath: string;
   replaysPath: string;
@@ -144,6 +145,7 @@ export function initRunPaths(rootRepo: string, opts?: { outDir?: string }) {
   const battlesPath = join(outDir, 'battles.jsonl');
   const summaryPath = join(outDir, 'summary.json');
   const errorsPath = join(outDir, 'errors.jsonl');
+  const invalidsPath = join(outDir, 'invalids.jsonl');
   const debugPath = join(outDir, 'debug.jsonl');
   const batchesPath = join(outDir, 'batches.jsonl');
 
@@ -158,6 +160,7 @@ export function initRunPaths(rootRepo: string, opts?: { outDir?: string }) {
     battlesPath,
     summaryPath,
     errorsPath,
+    invalidsPath,
     debugPath,
     trajectoriesPath,
     replaysPath,
@@ -395,6 +398,9 @@ export async function runBattlesChunk(opts: {
 
       phase = 'battle';
       const result = await runOneBattle({
+        runId: opts.runId,
+        battleId,
+        invalidLogPath: opts.paths.invalidsPath,
         formatId: opts.formatId,
         seed: battleSeed,
         p1: {

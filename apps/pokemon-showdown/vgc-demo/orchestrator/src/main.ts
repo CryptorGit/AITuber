@@ -284,6 +284,7 @@ async function main() {
   const battlesPath = join(outDir, 'battles.jsonl');
   const summaryPath = join(outDir, 'summary.json');
   const errorsPath = join(outDir, 'errors.jsonl');
+  const invalidsPath = join(outDir, 'invalids.jsonl');
   const debugPath = join(outDir, 'debug.jsonl');
 
   const trajectoriesPath = join(
@@ -295,9 +296,13 @@ async function main() {
   // Make outputs deterministic per run (no stale/accumulated lines).
   rmSync(battlesPath, { force: true });
   rmSync(errorsPath, { force: true });
+  rmSync(invalidsPath, { force: true });
   rmSync(debugPath, { force: true });
   rmSync(trajectoriesPath, { force: true });
   rmSync(replaysPath, { force: true });
+
+  // Create empty marker logs so "no events" is explicit.
+  writeFileSync(invalidsPath, '', 'utf8');
 
   const appendSave = saveCfg.compress ? appendJsonlGz : appendJsonl;
 
@@ -443,6 +448,9 @@ async function main() {
 
       phase = 'battle';
       const result = await runOneBattle({
+        runId,
+        battleId,
+        invalidLogPath: invalidsPath,
         formatId: resolved.id,
         seed: battleSeed,
         p1: {

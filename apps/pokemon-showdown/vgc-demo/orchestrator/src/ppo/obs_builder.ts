@@ -11,6 +11,7 @@ import {
   PPO_TEAM_SIZE,
   type PackedObs,
 } from './obs_types';
+import { PPO_PASS_ACTION_ID } from './action_space';
 import { make2d } from './util';
 import { BattleStateTracker } from './battle_state_tracker';
 
@@ -64,8 +65,8 @@ export function buildPackedObs(tr: BattleStateTracker): PackedObs {
   const history_float = make2d(PPO_HISTORY_K, HISTORY_FLOAT_DIM, 0);
 
   for (let k = 0; k < PPO_HISTORY_K; k++) {
-    const my = tr.last_actions_my[k] ?? [0, 0];
-    const opp = tr.last_actions_opp[k] ?? [0, 0];
+    const my = tr.last_actions_my[k] ?? [PPO_PASS_ACTION_ID, PPO_PASS_ACTION_ID];
+    const opp = tr.last_actions_opp[k] ?? [PPO_PASS_ACTION_ID, PPO_PASS_ACTION_ID];
     history_int[k][0] = my[0] | 0;
     history_int[k][1] = my[1] | 0;
     history_int[k][2] = opp[0] | 0;

@@ -6,6 +6,7 @@ import { chooseLocal, type LocalPolicyDebug } from '../ai/battle_policy';
 import type { PpoBattleCoordinator } from '../ppo/ppo_battle_coordinator';
 
 const DEBUG = process.env.VGC_DEMO_DEBUG === '1';
+const ALLOW_INVALID_FALLBACK = process.env.VGC_DEMO_INVALID_FALLBACK === '1';
 
 type DebugCtx = {
   logPath: string;
@@ -143,6 +144,9 @@ class OrchestratorPlayer {
   readonly stream: any;
   readonly debugCtx?: DebugCtx;
   lastRequest: ChoiceRequest | null = null;
+  lastNonWaitRequest: ChoiceRequest | null = null;
+  lastChoiceRequest: ChoiceRequest | null = null;
+  lastInvalidRecoveryAttempts = 0;
   latestTurn = 0;
   lastError: string | null = null;
   requestCount = 0;
@@ -174,6 +178,11 @@ class OrchestratorPlayer {
     if (cmd === 'request') {
       try {
         this.lastRequest = JSON.parse(rest);
+        if (this.lastRequest && !(this.lastRequest as any).wait) {
+          this.lastNonWaitRequest = this.lastRequest;
+        }
+        // New request observed => reset invalid recovery streak.
+        this.lastInvalidRecoveryAttempts = 0;
         this.requestCount++;
         const r: any = this.lastRequest;
         const fs = Array.isArray(r?.forceSwitch) ? r.forceSwitch.filter(Boolean).length : 0;
@@ -208,6 +217,11 @@ class OrchestratorPlayer {
   }
 }
 
+function clearInvalidError(p: OrchestratorPlayer): void {
+  // Keep only the latest error; when we decide to recover, clear it so the loop can proceed.
+  p.lastError = null;
+}
+
 function nowMs() {
   return Date.now();
 }
@@ -216,6 +230,19 @@ function isAllyTargetType(target: string | undefined): boolean {
   const t = String(target ?? '');
   return t === 'adjacentAlly' || t === 'ally' || t === 'adjacentAllyOrSelf';
 }
+
+const FORCE_NEEDS_TARGET_MOVE_IDS = new Set<string>([
+  'aurasphere',
+  'shadowball',
+  'darkpulse',
+  'thunderbolt',
+  'icebeam',
+  'flamethrower',
+  'energyball',
+  // Some request states omit `target` even for single-target moves.
+  'partingshot',
+  'ragefist',
+]);
 
 function moveTargetArg(target: string | undefined, activeIndex: number, hasPartner: boolean): string {
   // Default targets for common doubles single-target moves.
@@ -281,6 +308,9 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
     'icebeam',
     'flamethrower',
     'energyball',
+    // Some request states omit `target` even for single-target moves.
+    'partingshot',
+    'ragefist',
   ]);
 
   const pickFirstLegalMovePart = (active: any, activeIndex: number): string | null => {
@@ -319,6 +349,20 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
     return null;
   };
 
+  // Repair a pathological single-token choice in doubles.
+  // Showdown requires a full multi-choice string when both actives can act.
+  if (raw === 'pass' && allActives.length === 2) {
+    const a0 = allActives[0];
+    const a1 = allActives[1];
+    const can0 = Array.isArray(a0?.moves) && a0.moves.length > 0;
+    const can1 = Array.isArray(a1?.moves) && a1.moves.length > 0;
+    if (can0 && can1) {
+      const c0 = pickFirstLegalMovePart(a0, 0) ?? 'default';
+      const c1 = pickFirstLegalMovePart(a1, 1) ?? 'default';
+      return `${c0}, ${c1}`;
+    }
+  }
+
   // Special case: only one choice part in doubles.
   // If only one active is actually alive, use that position's request entry.
   if (parts.length === 1 && allActives.length === 2) {
@@ -344,24 +388,36 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
       continue;
     }
 
-    // Accept: "move <slot>" or "move <slot> <target>".
-    const m = /^move\s+(\d+)(?:\s+(-?\d+))?\s*$/i.exec(part);
-    if (!m) {
+    // Accept: "move <slot> [<targetLoc>] [<flags...>]".
+    // Showdown can include extra tokens (e.g., terastallize/mega-like flags) which
+    // must be preserved when we add/strip targetLoc.
+    const tokens = part.split(/\s+/).filter(Boolean);
+    if (tokens.length < 2 || tokens[0].toLowerCase() !== 'move' || !/^\d+$/.test(tokens[1])) {
       normalized.push(part);
       continue;
     }
-    const moveSlot = Number(m[1]);
-    const hadTarget = typeof m[2] === 'string' && m[2].length > 0;
+    const moveSlot = Number(tokens[1]);
+    const hadTarget = tokens.length >= 3 && /^-?\d+$/.test(tokens[2]);
+    const extraTokens = hadTarget ? tokens.slice(3) : tokens.slice(2);
+    const extraSuffix = extraTokens.length ? ` ${extraTokens.join(' ')}` : '';
     const moveObj = Array.isArray(active?.moves) ? active.moves[moveSlot - 1] : null;
     const targetType = moveObj?.target as string | undefined;
     const actualActiveIndex = allActives.length === 2 ? Math.max(0, allActives.indexOf(active)) : 0;
     const moveId = String(moveObj?.id ?? '').toLowerCase();
     const moveName = String(moveObj?.move ?? '').toLowerCase();
 
+    // Some policies may emit an out-of-range move slot (e.g. "move 3") even when
+    // the current request only exposes 1-2 moves. Repair to the first legal move.
+    if (!moveObj || typeof moveObj !== 'object') {
+      const repl = pickFirstLegalMovePart(active, actualActiveIndex);
+      normalized.push(repl ? `${repl}${extraSuffix}` : 'default');
+      continue;
+    }
+
     // Hard guarantee: never emit a disabled move.
     if (moveObj?.disabled) {
       const repl = pickFirstLegalMovePart(active, actualActiveIndex);
-      normalized.push(repl ?? 'default');
+      normalized.push(repl ? `${repl}${extraSuffix}` : 'default');
       continue;
     }
 
@@ -393,6 +449,11 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
       // Side / self setup
       'tailwind',
       'nastyplot',
+
+      // Forced / auto-target moves (targetLoc is not allowed in some request states)
+      'struggle',
+      'recharge',
+      'outrage',
     ]);
     const forceNoTarget =
       neverTargetMoveIds.has(moveId) ||
@@ -423,7 +484,7 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
     // If we already have a target arg but the move is obviously no-target, strip it
     // even if `targetType` is missing/unreliable.
     if (forceNoTarget && hadTarget) {
-      normalized.push(`move ${moveSlot}`);
+      normalized.push(`move ${moveSlot}${extraSuffix}`);
       continue;
     }
 
@@ -433,8 +494,8 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
       // If the move is not in our known no-target list and a target wasn't
       // provided, default to the primary foe ("1"). This is safer than emitting
       // an invalid choice that can stall the battle.
-      if ((!forceNoTarget && forceNeedsTarget && !hadTarget) || (!forceNoTarget && !hadTarget && part.startsWith('move '))) {
-        normalized.push(`move ${moveSlot} 1`);
+      if (!forceNoTarget && forceNeedsTarget && !hadTarget) {
+        normalized.push(`move ${moveSlot} 1${extraSuffix}`);
         continue;
       }
       normalized.push(part);
@@ -454,7 +515,7 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
       // Otherwise, force a valid ally/self target.
       const arg = moveTargetArg(targetType, actualActiveIndex, hasPartner);
       if (arg) {
-        normalized.push(`move ${moveSlot}${arg}`);
+        normalized.push(`move ${moveSlot}${arg}${extraSuffix}`);
         continue;
       }
       const repl = pickFirstLegalMovePart(active, actualActiveIndex);
@@ -475,11 +536,11 @@ function normalizeChoiceForRequest(choice: string, req: any): string {
         targetType === 'adjacentAllyOrSelf');
 
     if (needsTarget && !hadTarget) {
-      normalized.push(`move ${moveSlot}${moveTargetArg(targetType, actualActiveIndex, hasPartner)}`);
+      normalized.push(`move ${moveSlot}${moveTargetArg(targetType, actualActiveIndex, hasPartner)}${extraSuffix}`);
       continue;
     }
     if (!needsTarget && hadTarget) {
-      normalized.push(`move ${moveSlot}`);
+      normalized.push(`move ${moveSlot}${extraSuffix}`);
       continue;
     }
 
@@ -556,7 +617,10 @@ function pickRandomChoiceFromRequest(req: any, seed: number): string {
     if (moves.length > 0) {
       const m = moves[Math.floor(rng() * moves.length)];
       const moveSlot = Number(m.__slot);
-      return `move ${moveSlot}${moveTargetArg(m?.target, activeIndex, hasPartner)}`;
+      const id = String(m?.id ?? '').toLowerCase();
+      const arg = moveTargetArg(m?.target, activeIndex, hasPartner);
+      if (!arg && FORCE_NEEDS_TARGET_MOVE_IDS.has(id)) return `move ${moveSlot} 1`;
+      return `move ${moveSlot}${arg}`;
     }
     if (canSwitch && switchSlots.length > 0) {
       const s = switchSlots[Math.floor(rng() * switchSlots.length)];
@@ -631,26 +695,97 @@ function choiceLooksDisabledInRequest(choice: string, req: any): boolean {
     .filter(Boolean);
   if (parts.length === 0) return false;
 
-  const allActives = (req?.active ?? []).filter((a: any) => a && typeof a === 'object');
-  if (allActives.length === 0) return false;
-  const actionableActives = allActives.filter((a: any) => Array.isArray(a?.moves) && a.moves.length > 0);
-  const actives = actionableActives.length > 0 ? actionableActives : allActives;
+  const activesReqAll = Array.isArray(req?.active) ? (req.active as any[]) : [];
+  if (activesReqAll.length === 0) return false;
 
-  for (let i = 0; i < parts.length && i < actives.length; i++) {
+  // Map choice parts to the same actionable active slots logic used by PPO action building.
+  // Showdown can include move lists for fainted/non-actionable actives; using that directly
+  // can produce false positives (e.g. PPO chooses for slot 2 but we validate against slot 1).
+  const sideMons = Array.isArray(req?.side?.pokemon) ? (req.side.pokemon as any[]) : [];
+  const activesFromSide = sideMons.filter((p) => p && typeof p === 'object' && p.active);
+  const aliveActiveSlots: number[] = [];
+  for (let slot = 0; slot < Math.min(2, activesFromSide.length); slot++) {
+    const p = activesFromSide[slot];
+    if (p?.fainted) continue;
+    const cond = String(p?.condition ?? '').trim();
+    if (cond === '0 fnt' || cond === '0fnt') continue;
+    aliveActiveSlots.push(slot);
+  }
+
+  // If we can infer alive actives, validate only those slots (in slot order).
+  // Otherwise, fall back to the first N actives in req.active.
+  const slotsToCheck = aliveActiveSlots.length > 0 ? aliveActiveSlots : [0, 1].filter((i) => i < activesReqAll.length);
+
+  for (let i = 0; i < parts.length && i < slotsToCheck.length; i++) {
     const part = parts[i];
     if (!part.startsWith('move ')) continue;
     const m = /^move\s+(\d+)/i.exec(part);
     if (!m) continue;
     const moveSlot = Number(m[1]);
-    const active = actives[i];
-    const moveObj = Array.isArray(active?.moves) ? active.moves[moveSlot - 1] : null;
+    const slotIndex = slotsToCheck[i];
+    const active = activesReqAll[slotIndex];
+    const moveObj = Array.isArray(active?.moves) ? (active.moves as any[])[moveSlot - 1] : null;
     if (!moveObj) continue;
     if (moveObj?.disabled) return true;
   }
   return false;
 }
 
+function repairChoiceFromInvalidError(args: { lastChoice: string | null; err: any }): string | null {
+  const lastChoice = String(args.lastChoice ?? '').trim();
+  if (!lastChoice) return null;
+
+  const msg = String(args.err ?? '');
+  const low = msg.toLowerCase();
+
+  // Pattern A: "You can't choose a target for X" => strip targetLoc(s)
+  if (low.includes("can't choose a target") || low.includes('cant choose a target')) {
+    const parts = lastChoice
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => {
+        const tokens = p.split(/\s+/).filter(Boolean);
+        if (tokens.length < 3) return p;
+        if (tokens[0].toLowerCase() !== 'move') return p;
+        if (!/^\d+$/.test(tokens[1])) return p;
+        if (!/^-?\d+$/.test(tokens[2])) return p;
+        // Strip only the targetLoc token (3rd token), keep any extra flags.
+        const repairedTokens = [tokens[0], tokens[1], ...tokens.slice(3)];
+        return repairedTokens.join(' ');
+      });
+    const repaired = parts.join(', ');
+    return repaired !== lastChoice ? repaired : null;
+  }
+
+  // Pattern B: "<Move> needs a target" => add a default foe target ("1")
+  if (low.includes('needs a target')) {
+    const parts = lastChoice
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => {
+        const tokens = p.split(/\s+/).filter(Boolean);
+        if (tokens.length < 2) return p;
+        if (tokens[0].toLowerCase() !== 'move') return p;
+        if (!/^\d+$/.test(tokens[1])) return p;
+        // If a targetLoc is already present, leave it.
+        if (tokens.length >= 3 && /^-?\d+$/.test(tokens[2])) return p;
+        // Insert default targetLoc right after move slot, before any extra flags.
+        const repairedTokens = [tokens[0], tokens[1], '1', ...tokens.slice(2)];
+        return repairedTokens.join(' ');
+      });
+    const repaired = parts.join(', ');
+    return repaired !== lastChoice ? repaired : null;
+  }
+
+  return null;
+}
+
 export async function runOneBattle(opts: {
+  runId: string;
+  battleId: string;
+  invalidLogPath: string;
   formatId: string;
   seed: number;
   p1: { name: string; team: string; policyMode: PolicyMode; python?: PythonClient; teamPreviewChoice?: string };
@@ -676,6 +811,22 @@ export async function runOneBattle(opts: {
   let winner: string | null = null;
   let ended = false;
   let turns = 0;
+
+  const emitInvalid = (evt: Record<string, unknown>) => {
+    try {
+      appendJsonl(opts.invalidLogPath, {
+        t_ms: Date.now(),
+        run_id: opts.runId,
+        battle_id: opts.battleId,
+        format: opts.formatId,
+        seed: opts.seed,
+        turn: turns,
+        ...evt,
+      });
+    } catch {
+      // best-effort
+    }
+  };
 
   // Read spectator logs to capture |win| and |turn|
   (async () => {
@@ -751,28 +902,199 @@ export async function runOneBattle(opts: {
     const p1ErrNow = p1.lastError;
     if (isInvalidChoiceError(p1ErrNow)) {
       const r1Now = p1.lastRequest as any;
+      const r1Recovery = (p1.lastChoiceRequest as any) ?? (p1.lastNonWaitRequest as any) ?? (r1Now && !r1Now.wait ? r1Now : null);
+      p1.lastInvalidRecoveryAttempts++;
+
+      emitInvalid({
+        type: 'invalid_choice',
+        stage: 'detected',
+        player: 'p1',
+        last_error: String(p1ErrNow ?? ''),
+        last_choice: p1.lastChoice,
+        recovery_attempt: p1.lastInvalidRecoveryAttempts,
+        req_summary: r1Recovery ? summarizeRequest(r1Recovery) : null,
+      });
+
       if (opts.p1.policyMode === 'ppo' && opts.ppo) {
         opts.ppo.dumpInvalidChoice({
           player: 'p1',
           turn: turns,
-          req: r1Now,
+          req: r1Recovery,
           note: { last_error: p1ErrNow, last_choice: p1.lastChoice },
         });
       }
-      throw new Error(`Invalid choice detected for p1: ${String(p1ErrNow ?? '')}`);
+
+      // Best-effort auto-repair for common target-arg invalids.
+      // IMPORTANT: only try repair once per invalid streak; otherwise some moves can
+      // oscillate between "needs a target" and "can't choose a target" and stall.
+      if (p1.lastInvalidRecoveryAttempts === 1 && r1Recovery) {
+        const repaired = repairChoiceFromInvalidError({ lastChoice: p1.lastChoice, err: p1ErrNow });
+        if (repaired) {
+          emitInvalid({
+            type: 'invalid_choice',
+            stage: 'repair_applied',
+            player: 'p1',
+            last_error: String(p1ErrNow ?? ''),
+            last_choice: p1.lastChoice,
+            repaired_choice: repaired,
+            recovery_attempt: p1.lastInvalidRecoveryAttempts,
+          });
+          clearInvalidError(p1);
+          p1.lastRequest = null;
+          // IMPORTANT: do not re-normalize repairs here. For errors like
+          // "can't choose a target", normalization can re-add targetLoc and
+          // cause oscillation.
+          p1.choose(repaired);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          continue;
+        }
+        emitInvalid({
+          type: 'invalid_choice',
+          stage: 'repair_noop',
+          player: 'p1',
+          last_error: String(p1ErrNow ?? ''),
+          last_choice: p1.lastChoice,
+          recovery_attempt: p1.lastInvalidRecoveryAttempts,
+        });
+      }
+
+      if (p1.lastInvalidRecoveryAttempts > 3) {
+        emitInvalid({
+          type: 'invalid_choice',
+          stage: 'recovery_limit',
+          player: 'p1',
+          last_error: String(p1ErrNow ?? ''),
+          last_choice: p1.lastChoice,
+          recovery_attempt: p1.lastInvalidRecoveryAttempts,
+        });
+        throw new Error(`Invalid choice detected for p1 (recovery limit): ${String(p1ErrNow ?? '')}`);
+      }
+
+      if (!ALLOW_INVALID_FALLBACK || !r1Recovery) {
+        emitInvalid({
+          type: 'invalid_choice',
+          stage: 'throw_no_fallback',
+          player: 'p1',
+          last_error: String(p1ErrNow ?? ''),
+          last_choice: p1.lastChoice,
+          allow_fallback: ALLOW_INVALID_FALLBACK,
+          has_recovery_req: !!r1Recovery,
+          recovery_attempt: p1.lastInvalidRecoveryAttempts,
+        });
+        throw new Error(`Invalid choice detected for p1: ${String(p1ErrNow ?? '')}`);
+      }
+      // Recovery: pick a safe fallback choice and continue the battle.
+      const fallback = pickRandomChoiceFromRequest(r1Recovery, opts.seed + turns * 17 + 1 + p1.choiceCount * 997 + 777);
+      emitInvalid({
+        type: 'invalid_choice',
+        stage: 'fallback',
+        player: 'p1',
+        last_error: String(p1ErrNow ?? ''),
+        last_choice: p1.lastChoice,
+        fallback_choice_raw: fallback,
+        fallback_choice_norm: normalizeChoiceForRequest(fallback, r1Recovery),
+        recovery_attempt: p1.lastInvalidRecoveryAttempts,
+      });
+      clearInvalidError(p1);
+      p1.lastRequest = null;
+      p1.choose(normalizeChoiceForRequest(fallback, r1Recovery));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      continue;
     }
     const p2ErrNow = p2.lastError;
     if (isInvalidChoiceError(p2ErrNow)) {
       const r2Now = p2.lastRequest as any;
+      const r2Recovery = (p2.lastChoiceRequest as any) ?? (p2.lastNonWaitRequest as any) ?? (r2Now && !r2Now.wait ? r2Now : null);
+      p2.lastInvalidRecoveryAttempts++;
+
+      emitInvalid({
+        type: 'invalid_choice',
+        stage: 'detected',
+        player: 'p2',
+        last_error: String(p2ErrNow ?? ''),
+        last_choice: p2.lastChoice,
+        recovery_attempt: p2.lastInvalidRecoveryAttempts,
+        req_summary: r2Recovery ? summarizeRequest(r2Recovery) : null,
+      });
+
       if (opts.p2.policyMode === 'ppo' && opts.ppo) {
         opts.ppo.dumpInvalidChoice({
           player: 'p2',
           turn: turns,
-          req: r2Now,
+          req: r2Recovery,
           note: { last_error: p2ErrNow, last_choice: p2.lastChoice },
         });
       }
-      throw new Error(`Invalid choice detected for p2: ${String(p2ErrNow ?? '')}`);
+
+      if (p2.lastInvalidRecoveryAttempts === 1 && r2Recovery) {
+        const repaired = repairChoiceFromInvalidError({ lastChoice: p2.lastChoice, err: p2ErrNow });
+        if (repaired) {
+          emitInvalid({
+            type: 'invalid_choice',
+            stage: 'repair_applied',
+            player: 'p2',
+            last_error: String(p2ErrNow ?? ''),
+            last_choice: p2.lastChoice,
+            repaired_choice: repaired,
+            recovery_attempt: p2.lastInvalidRecoveryAttempts,
+          });
+          clearInvalidError(p2);
+          p2.lastRequest = null;
+          p2.choose(repaired);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          continue;
+        }
+        emitInvalid({
+          type: 'invalid_choice',
+          stage: 'repair_noop',
+          player: 'p2',
+          last_error: String(p2ErrNow ?? ''),
+          last_choice: p2.lastChoice,
+          recovery_attempt: p2.lastInvalidRecoveryAttempts,
+        });
+      }
+
+      if (p2.lastInvalidRecoveryAttempts > 3) {
+        emitInvalid({
+          type: 'invalid_choice',
+          stage: 'recovery_limit',
+          player: 'p2',
+          last_error: String(p2ErrNow ?? ''),
+          last_choice: p2.lastChoice,
+          recovery_attempt: p2.lastInvalidRecoveryAttempts,
+        });
+        throw new Error(`Invalid choice detected for p2 (recovery limit): ${String(p2ErrNow ?? '')}`);
+      }
+
+      if (!ALLOW_INVALID_FALLBACK || !r2Recovery) {
+        emitInvalid({
+          type: 'invalid_choice',
+          stage: 'throw_no_fallback',
+          player: 'p2',
+          last_error: String(p2ErrNow ?? ''),
+          last_choice: p2.lastChoice,
+          allow_fallback: ALLOW_INVALID_FALLBACK,
+          has_recovery_req: !!r2Recovery,
+          recovery_attempt: p2.lastInvalidRecoveryAttempts,
+        });
+        throw new Error(`Invalid choice detected for p2: ${String(p2ErrNow ?? '')}`);
+      }
+      const fallback = pickRandomChoiceFromRequest(r2Recovery, opts.seed + turns * 17 + 2 + p2.choiceCount * 997 + 888);
+      emitInvalid({
+        type: 'invalid_choice',
+        stage: 'fallback',
+        player: 'p2',
+        last_error: String(p2ErrNow ?? ''),
+        last_choice: p2.lastChoice,
+        fallback_choice_raw: fallback,
+        fallback_choice_norm: normalizeChoiceForRequest(fallback, r2Recovery),
+        recovery_attempt: p2.lastInvalidRecoveryAttempts,
+      });
+      clearInvalidError(p2);
+      p2.lastRequest = null;
+      p2.choose(normalizeChoiceForRequest(fallback, r2Recovery));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      continue;
     }
 
     const r1 = p1.lastRequest as any;
@@ -800,7 +1122,16 @@ export async function runOneBattle(opts: {
             note: { last_error: p1Err, last_choice: p1.lastChoice },
           });
         }
-        throw new Error(`Invalid choice detected for p1: ${String(p1Err ?? '')}`);
+        if (!ALLOW_INVALID_FALLBACK) {
+          throw new Error(`Invalid choice detected for p1: ${String(p1Err ?? '')}`);
+        }
+        const fallback = pickRandomChoiceFromRequest(r1, opts.seed + turns * 17 + 1 + p1.choiceCount * 997 + 1001);
+        clearInvalidError(p1);
+        p1.lastRequest = null;
+        if (debug && debugLines++ < 20) console.log(`[vgc-demo][p1] recover invalid => ${fallback}`);
+        p1.lastChoiceRequest = r1;
+        p1.choose(normalizeChoiceForRequest(fallback, r1));
+        continue;
       }
 
       const choiceAttempt = p1.choiceCount;
@@ -829,7 +1160,7 @@ export async function runOneBattle(opts: {
           throw new Error(`PPO produced disabled choice for p1: ${d.choice_norm}`);
         }
         const fallback = pickRandomChoiceFromRequest(r1, opts.seed + turns * 17 + 1 + choiceAttempt * 997 + 123);
-        d = { choice_raw: d.choice_raw, choice_norm: fallback, choice_source: 'fallback' };
+        d = { choice_raw: d.choice_raw, choice_norm: normalizeChoiceForRequest(fallback, r1), choice_source: 'fallback' };
       }
       if (opts.trace) {
         opts.trace({
@@ -846,6 +1177,8 @@ export async function runOneBattle(opts: {
       }
       p1.lastRequest = null;
       if (debug && debugLines++ < 20) console.log(`[vgc-demo][p1] choose: ${d.choice_norm}`);
+      p1.lastChoiceRequest = r1;
+      p1.lastInvalidRecoveryAttempts = 0;
       p1.choose(d.choice_norm);
     }
 
@@ -864,7 +1197,16 @@ export async function runOneBattle(opts: {
             note: { last_error: p2Err, last_choice: p2.lastChoice },
           });
         }
-        throw new Error(`Invalid choice detected for p2: ${String(p2Err ?? '')}`);
+        if (!ALLOW_INVALID_FALLBACK) {
+          throw new Error(`Invalid choice detected for p2: ${String(p2Err ?? '')}`);
+        }
+        const fallback = pickRandomChoiceFromRequest(r2, opts.seed + turns * 17 + 2 + p2.choiceCount * 997 + 2002);
+        clearInvalidError(p2);
+        p2.lastRequest = null;
+        if (debug && debugLines++ < 20) console.log(`[vgc-demo][p2] recover invalid => ${fallback}`);
+        p2.lastChoiceRequest = r2;
+        p2.choose(normalizeChoiceForRequest(fallback, r2));
+        continue;
       }
 
       const choiceAttempt = p2.choiceCount;
@@ -893,7 +1235,7 @@ export async function runOneBattle(opts: {
           throw new Error(`PPO produced disabled choice for p2: ${d.choice_norm}`);
         }
         const fallback = pickRandomChoiceFromRequest(r2, opts.seed + turns * 17 + 2 + choiceAttempt * 997 + 456);
-        d = { choice_raw: d.choice_raw, choice_norm: fallback, choice_source: 'fallback' };
+        d = { choice_raw: d.choice_raw, choice_norm: normalizeChoiceForRequest(fallback, r2), choice_source: 'fallback' };
       }
       if (opts.trace) {
         opts.trace({
@@ -910,6 +1252,8 @@ export async function runOneBattle(opts: {
       }
       p2.lastRequest = null;
       if (debug && debugLines++ < 20) console.log(`[vgc-demo][p2] choose: ${d.choice_norm}`);
+      p2.lastChoiceRequest = r2;
+      p2.lastInvalidRecoveryAttempts = 0;
       p2.choose(d.choice_norm);
     }
 

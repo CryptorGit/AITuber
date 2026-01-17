@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
@@ -139,15 +139,21 @@ async function main() {
       if (sid === 'latest') {
         const snaps = await ppoClient.listSnapshots();
         snaps.sort((a, b) => (b.step ?? 0) - (a.step ?? 0));
-        if (!snaps.length) throw new Error('no snapshots found');
-        sid = snaps[0].id;
-        console.log(`[train] resume_snapshot=latest resolved_id=${sid} step=${snaps[0].step}`);
+        if (!snaps.length) {
+          console.log('[train] resume_snapshot=latest but no snapshots found; starting fresh');
+          sid = '';
+        } else {
+          sid = snaps[0].id;
+          console.log(`[train] resume_snapshot=latest resolved_id=${sid} step=${snaps[0].step}`);
+        }
       } else {
         console.log(`[train] resume_snapshot=${sid}`);
       }
-      const ok = await ppoClient.loadSnapshot(sid);
-      if (!ok) throw new Error(`snapshot/load returned ok=false for id=${sid}`);
-      console.log(`[train] resumed from snapshot id=${sid}`);
+      if (sid) {
+        const ok = await ppoClient.loadSnapshot(sid);
+        if (!ok) throw new Error(`snapshot/load returned ok=false for id=${sid}`);
+        console.log(`[train] resumed from snapshot id=${sid}`);
+      }
     } catch (e: any) {
       console.error(`[train] resume failed: ${String(e?.message ?? e)}`);
       process.exit(2);
@@ -157,10 +163,14 @@ async function main() {
   // Fresh run directory.
   rmSync(paths.battlesPath, { force: true });
   rmSync(paths.errorsPath, { force: true });
+  rmSync(paths.invalidsPath, { force: true });
   rmSync(paths.debugPath, { force: true });
   rmSync(paths.trajectoriesPath, { force: true });
   rmSync(paths.replaysPath, { force: true });
   if (paths.batchesPath) rmSync(paths.batchesPath, { force: true });
+
+  // Create empty marker logs so "no events" is explicit.
+  writeFileSync(paths.invalidsPath, '', 'utf8');
 
   // RUN_ID: required for E2E isolation + metrics reproducibility.
   const runId = makeRunId();

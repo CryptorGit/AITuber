@@ -1,52 +1,63 @@
-import { PPO_ACTIONS_PER_ACTIVE, PpoTarget, encodeMoveAction, encodeSwitchAction } from './action_space';
+import { PPO_ACTIONS_PER_ACTIVE, PPO_MOVE_ACTIONS, PPO_PASS_ACTION_ID, PpoTarget, encodeMoveAction, encodeSwitchAction } from './action_space';
 import { BattleStateTracker } from './battle_state_tracker';
 import { isFaintedFromCondition } from './util';
 
-function isNoTargetMoveId(id: string): boolean {
-  const m = String(id ?? '').toLowerCase();
-  return (
-    // Protect family
-    m === 'protect' ||
-    m === 'detect' ||
-    m === 'spikyshield' ||
-    m === 'kingsshield' ||
-    m === 'banefulbunker' ||
-    m === 'silktrap' ||
-    m === 'obstruct' ||
-    m === 'endure' ||
-    // Guards
-    m === 'wideguard' ||
-    m === 'quickguard' ||
-    m === 'craftyshield' ||
-    m === 'matblock' ||
-    // Common spread / no-target
-    m === 'rockslide' ||
-    m === 'icywind' ||
-    m === 'makeitrain' ||
-    m === 'bleakwindstorm' ||
-    // Redirection
-    m === 'followme' ||
-    m === 'ragepowder' ||
-    // Side setup
-    m === 'tailwind'
-  );
-}
+const forceNeedsTargetMoveIds = new Set<string>([
+  'aurasphere',
+  'shadowball',
+  'darkpulse',
+  'thunderbolt',
+  'icebeam',
+  'flamethrower',
+  'energyball',
+  // Some request states omit `target` even for single-target moves.
+  // These are common offenders that then trip "<move> needs a target".
+  'partingshot',
+  'ragefist',
+]);
 
-function needsTarget(targetType: string | undefined, moveId: string): boolean {
-  if (isNoTargetMoveId(moveId)) return false;
-  const t = String(targetType ?? '');
-  if (!t) return true;
-  return (
-    t === 'normal' ||
-    t === 'adjacentFoe' ||
-    t === 'any' ||
-    t === 'anyAdjacentFoe' ||
-    t === 'randomNormal' ||
-    t === 'adjacentAlly' ||
-    t === 'ally' ||
-    t === 'adjacentAllyOrSelf' ||
-    t === 'self'
-  );
+const neverTargetMoveIds = new Set<string>([
+  // Protect family
+  'protect',
+  'detect',
+  'spikyshield',
+  'kingsshield',
+  'banefulbunker',
+  'silktrap',
+  'obstruct',
+  'endure',
+  // Guards
+  'wideguard',
+  'quickguard',
+  'craftyshield',
+  'matblock',
+  // Common VGC spread / no-target moves in our demo set pool
+  'rockslide',
+  'icywind',
+  'makeitrain',
+  'bleakwindstorm',
+  // Redirection
+  'followme',
+  'ragepowder',
+  // Side / self setup
+  'tailwind',
+  'nastyplot',
+
+  // Forced / auto-target moves (targetLoc is not allowed in some request states)
+  'struggle',
+  'recharge',
+  'outrage',
+]);
+
+function isNoTargetTargetType(t: string): boolean {
+  // Common PS target types that do not require an explicit targetLoc.
+  // Keep this conservative; when unsure, prefer NO target rather than guessing a foe slot.
+  const s = String(t ?? '');
+  if (!s) return false;
+  if (s === 'self') return true;
+  if (s.startsWith('all')) return true;
+  if (s === 'adjacentAllies' || s === 'allies') return true;
+  return false;
 }
 
 function moveTargetLoc(target: PpoTarget, activeIndex: number, hasPartner: boolean, oppHasPartner: boolean): string {
@@ -174,11 +185,14 @@ export function buildActionsForRequest(args: {
   ) => {
     const forced = !!forceSwitch?.[slotIndex];
 
+    // Showdown: canTerastallize is a string (tera type) when still available, else ''.
+    const canTera = !!String(activeReq?.canTerastallize ?? '').trim();
+
     if (forced && forcePassOnly) {
       // Forced slot but no distinct switch is available for it.
       // Must respond with 'pass' to avoid an incomplete forced-switch choice.
-      outMask[0] = 1;
-      outTable[0] = 'pass';
+      outMask[PPO_PASS_ACTION_ID] = 1;
+      outTable[PPO_PASS_ACTION_ID] = 'pass';
       return;
     }
 
@@ -189,35 +203,68 @@ export function buildActionsForRequest(args: {
       if (m.disabled) continue;
       const moveSlot1 = j + 1;
       const id = String(m?.id ?? '').toLowerCase();
+      const moveName = String(m?.move ?? '').toLowerCase();
       const targetType = m?.target as string | undefined;
 
-      const wantsTarget = needsTarget(targetType, id);
-      const allowedTargets: PpoTarget[] = [];
+      const forceNoTarget =
+        neverTargetMoveIds.has(id) ||
+        moveName === 'protect' ||
+        moveName === 'spiky shield' ||
+        moveName === 'rock slide' ||
+        moveName === 'icy wind' ||
+        moveName === 'make it rain' ||
+        moveName === 'bleakwind storm' ||
+        moveName === 'follow me' ||
+        moveName === 'rage powder' ||
+        moveName === 'tailwind' ||
+        moveName === 'nasty plot';
 
-      if (!wantsTarget) {
-        allowedTargets.push(PpoTarget.none);
-      } else {
-        const t = String(targetType ?? '');
-        if (t === 'adjacentAlly' || t === 'ally') {
-          if (hasPartner) allowedTargets.push(PpoTarget.ally);
-        } else if (t === 'adjacentAllyOrSelf') {
-          if (hasPartner) allowedTargets.push(PpoTarget.ally);
-          allowedTargets.push(PpoTarget.self);
-        } else if (t === 'self') {
-          allowedTargets.push(PpoTarget.self);
-        } else {
-          // foe targeting (or unknown): allow opp1 always; opp2 only if opponent has a partner alive.
+      const allowedTargets: PpoTarget[] = [];
+      const t = String(targetType ?? '');
+
+      // If request metadata is missing/unreliable, do NOT guess that the move is foe-targeted.
+      // Prefer NO target unless we are confident the move requires a target.
+      if (!t) {
+        if (forceNeedsTargetMoveIds.has(id)) {
           allowedTargets.push(PpoTarget.opp1);
           if (oppHasPartner) allowedTargets.push(PpoTarget.opp2);
+        } else {
+          allowedTargets.push(PpoTarget.none);
         }
+      } else if (forceNoTarget || isNoTargetTargetType(t)) {
+        allowedTargets.push(PpoTarget.none);
+      } else if (t === 'adjacentAlly' || t === 'ally') {
+        if (hasPartner) allowedTargets.push(PpoTarget.ally);
+      } else if (t === 'adjacentAllyOrSelf') {
+        if (hasPartner) allowedTargets.push(PpoTarget.ally);
+        allowedTargets.push(PpoTarget.self);
+      } else if (
+        t === 'normal' ||
+        t === 'adjacentFoe' ||
+        t === 'any' ||
+        t === 'anyAdjacentFoe' ||
+        t === 'randomNormal'
+      ) {
+        allowedTargets.push(PpoTarget.opp1);
+        if (oppHasPartner) allowedTargets.push(PpoTarget.opp2);
+      } else {
+        // Unknown target type: safest is to omit target.
+        allowedTargets.push(PpoTarget.none);
       }
 
       for (const tgt of allowedTargets) {
-        const actionId = encodeMoveAction(moveSlot1, tgt);
         const loc = moveTargetLoc(tgt, slotIndex, hasPartner, oppHasPartner);
-        const choice = loc ? `move ${moveSlot1}${loc}` : `move ${moveSlot1}`;
-        outMask[actionId] = forced ? 0 : 1;
-        outTable[actionId] = forced ? null : choice;
+        const baseChoice = loc ? `move ${moveSlot1}${loc}` : `move ${moveSlot1}`;
+
+        // Non-tera variant
+        const a0 = encodeMoveAction(moveSlot1, tgt, 0);
+        outMask[a0] = forced ? 0 : 1;
+        outTable[a0] = forced ? null : baseChoice;
+
+        // Tera variant (only if still available)
+        const a1 = encodeMoveAction(moveSlot1, tgt, 1);
+        outMask[a1] = forced || !canTera ? 0 : 1;
+        outTable[a1] = forced || !canTera ? null : `${baseChoice} terastallize`;
       }
     }
 
@@ -236,7 +283,7 @@ export function buildActionsForRequest(args: {
     // (Showdown will often accept 'pass' for non-actionable slots.)
     if (forced) {
       // remove any move masks already set
-      for (let a = 0; a < 28; a++) {
+      for (let a = 0; a < PPO_MOVE_ACTIONS; a++) {
         outMask[a] = 0;
         outTable[a] = null;
       }
@@ -244,8 +291,8 @@ export function buildActionsForRequest(args: {
 
     // Guarantee at least one legal action.
     if (!outMask.some((x) => x === 1)) {
-      outMask[0] = 1;
-      outTable[0] = 'default';
+      outMask[PPO_PASS_ACTION_ID] = 1;
+      outTable[PPO_PASS_ACTION_ID] = 'pass';
     }
   };
 
@@ -267,8 +314,8 @@ export function buildActionsForRequest(args: {
   }
   else {
     // only one actionable active => mask right is dummy
-    mask_right[0] = 1;
-    table_right[0] = 'pass';
+    mask_right[PPO_PASS_ACTION_ID] = 1;
+    table_right[PPO_PASS_ACTION_ID] = 'pass';
   }
 
   return { expectedChoices, slot_left, slot_right, mask_left, mask_right, table_left, table_right };

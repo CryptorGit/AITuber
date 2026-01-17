@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from ppo_rl import PpoService
+from ppo_rl import ACTIONS_PER_ACTIVE, PpoService
 
 from policies import (
     heuristic_policy_choose,
@@ -180,7 +180,7 @@ def ppo_act(body: PpoActRequest) -> PpoActResponse:
         # Masks
         if not isinstance(body.mask_left, list) or not isinstance(body.mask_right, list):
             raise HTTPException(status_code=400, detail={"error": "ACT_FAILED", "message": "missing_or_invalid_mask", "details": details})
-        if len(body.mask_left) != 34 or len(body.mask_right) != 34:
+        if len(body.mask_left) != ACTIONS_PER_ACTIVE or len(body.mask_right) != ACTIONS_PER_ACTIVE:
             raise HTTPException(status_code=400, detail={"error": "ACT_FAILED", "message": "mask_shape_mismatch", "details": details})
         if details["mask_left_sum"] is not None and int(details["mask_left_sum"]) <= 0:
             raise HTTPException(status_code=400, detail={"error": "ACT_FAILED", "message": "mask_all_zero_left", "details": details})

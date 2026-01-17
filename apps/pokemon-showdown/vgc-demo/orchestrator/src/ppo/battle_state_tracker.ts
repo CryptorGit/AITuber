@@ -1,4 +1,5 @@
 import { moveId, speciesId, statusIdFromCondition, terrainId, weatherId } from './id_maps';
+import { PPO_PASS_ACTION_ID } from './action_space';
 import { PPO_HISTORY_K, PPO_TEAM_SIZE } from './obs_types';
 import { isFaintedFromCondition, parseHpFraction, parseSpeciesFromSwitchDetails, rotatePush } from './util';
 
@@ -29,6 +30,10 @@ export class BattleStateTracker {
   // Opponent ident -> slot index (0..5)
   private oppSlotByIdent: Map<string, number> = new Map();
   private nextOppSlot = 0;
+
+  // Track which opponent team slot occupies each active position (a/b).
+  // In doubles, both positions can be active simultaneously.
+  private oppActiveSlotByPos: Array<number | null> = [null, null];
 
   turn = 0;
   weather_id = 0;
@@ -68,8 +73,8 @@ export class BattleStateTracker {
 
     // Initialize history with zeros.
     for (let i = 0; i < PPO_HISTORY_K; i++) {
-      this.last_actions_my.push([0, 0]);
-      this.last_actions_opp.push([0, 0]);
+      this.last_actions_my.push([PPO_PASS_ACTION_ID, PPO_PASS_ACTION_ID]);
+      this.last_actions_opp.push([PPO_PASS_ACTION_ID, PPO_PASS_ACTION_ID]);
       this.last_damage.push([0, 0]);
     }
   }
@@ -217,13 +222,17 @@ export class BattleStateTracker {
         this.opp[slot].fainted = fainted;
       }
 
-      // Update active flags by position (a/b).
-      if (side === 'p2') {
-        for (const m of this.opp) m.active = false;
-        if (pos === 0 || pos === 1) {
-          const slot = this._oppSlotForIdent(who);
-          this.opp[slot].active = true;
+      // Update active flags by position (a/b) without clearing the other active.
+      // Important for doubles: both p2a and p2b can be active simultaneously.
+      if (side === 'p2' && (pos === 0 || pos === 1)) {
+        const slot = this._oppSlotForIdent(who);
+
+        const prev = this.oppActiveSlotByPos[pos];
+        if (typeof prev === 'number' && prev >= 0 && prev < this.opp.length) {
+          this.opp[prev].active = false;
         }
+        this.oppActiveSlotByPos[pos] = slot;
+        this.opp[slot].active = !fainted;
       }
       return;
     }
@@ -236,6 +245,11 @@ export class BattleStateTracker {
         this.opp[slot].fainted = true;
         this.opp[slot].hp_frac = 0;
         this.opp[slot].active = false;
+
+        // If a fainted mon was occupying an active position, clear it.
+        for (let pos = 0; pos < this.oppActiveSlotByPos.length; pos++) {
+          if (this.oppActiveSlotByPos[pos] === slot) this.oppActiveSlotByPos[pos] = null;
+        }
       }
       return;
     }

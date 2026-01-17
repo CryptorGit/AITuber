@@ -14,20 +14,26 @@ param(
 
   # How many battles to run per chunk (one invocation of run_ps_vgc_train.ps1).
   # Smaller chunks = more frequent snapshots + faster restart after failures.
-  [int]$BattlesPerBatch = 6000,
+  [int]$BattlesPerBatch = 500,
 
   # Rollout length for PPO updates.
-  [int]$PpoRolloutLen = 8,
+  [int]$PpoRolloutLen = 5048,
 
   # Save a PPO snapshot every N updates during training.
   # This is independent from replay saving; it's for resuming after crashes.
-  [int]$SnapshotEvery = 1000,
+  [int]$SnapshotEvery = 100,
 
   # Save exactly one replay after crossing each N updates.
   [int]$ReplayEveryUpdates = 10000,
 
   # Sleep between chunks (helps when recovering from transient errors).
-  [int]$SleepOnErrorSec = 5
+  [int]$SleepOnErrorSec = 5,
+
+  # Validation mode: if >0, stop after N chunks.
+  [int]$MaxChunks = 0,
+
+  # Fail-fast if any invalid recovery events are observed.
+  [int]$StopOnInvalid = 1
 )
 
 Set-StrictMode -Version Latest
@@ -64,6 +70,8 @@ if ($Detach -and $env:VGC_TRAIN_FOREVER_CHILD -ne "1") {
     "-SnapshotEvery", [string]$SnapshotEvery,
     "-ReplayEveryUpdates", [string]$ReplayEveryUpdates,
     "-SleepOnErrorSec", [string]$SleepOnErrorSec,
+    "-MaxChunks", [string]$MaxChunks,
+    "-StopOnInvalid", [string]$StopOnInvalid,
     "-LogDir", $LogDir
   )
 
@@ -102,9 +110,34 @@ Write-Host "[forever] battles_per_batch=$BattlesPerBatch ppo_rollout_len=$PpoRol
 Write-Host "[forever] replay_only_after_update=1 replay_every_updates=$ReplayEveryUpdates" -ForegroundColor Cyan
 Write-Host "[forever] Starting infinite training loop. Stop with Ctrl+C." -ForegroundColor Cyan
 
+function Get-LatestTrainOutDir {
+  param([string]$RepoRoot)
+  $root = Join-Path $RepoRoot 'data/pokemon-showdown/vgc-demo'
+  if (-not (Test-Path $root)) { return $null }
+  $dirs = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'train_*' }
+  if (-not $dirs) { return $null }
+  return ($dirs | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+}
+
+function Get-FileLineCount {
+  param([string]$Path)
+  if (-not $Path) { return 0 }
+  if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+  $content = Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue
+  if ($null -eq $content) { return 0 }
+  return @($content).Count
+}
+
+$chunkIndex = 0
+
 while ($true) {
+  $chunkIndex++
   Write-Host ("[forever] chunk start: {0}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
   try {
+    # Strict hygiene: do not allow "silent" invalid recovery during long training.
+    # If an invalid happens, we'd rather stop and fix it than keep collecting bad data.
+    $env:VGC_DEMO_INVALID_FALLBACK = '0'
+
     & $trainScript `
       -Epochs 1 `
       -BatchesPerEpoch 1 `
@@ -119,10 +152,36 @@ while ($true) {
       -SaveSnapshotOnExit 1 `
       -PpoRolloutLen $PpoRolloutLen
 
+    $latestOut = Get-LatestTrainOutDir -RepoRoot $repoRoot
+    if ($latestOut) {
+      $inv = Join-Path $latestOut 'invalids.jsonl'
+      if (Test-Path $inv) {
+        $n = Get-FileLineCount -Path $inv
+        Write-Host ("[forever] invalids.jsonl_lines={0} out_dir={1}" -f $n, $latestOut) -ForegroundColor DarkGray
+        if ($StopOnInvalid -eq 1 -and $n -gt 0) {
+          throw "invalid recovery events observed (invalids.jsonl_lines=$n). out_dir=$latestOut"
+        }
+      } else {
+        Write-Host ("[forever] NOTE: invalids.jsonl missing (out_dir={0})" -f $latestOut) -ForegroundColor DarkGray
+      }
+    }
+
     Write-Host ("[forever] chunk done: {0}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"))
+
   }
   catch {
     Write-Warning ("[forever] chunk failed: {0}" -f $_.Exception.Message)
+
+    # In validation mode, fail fast so CI/manual checks don't loop forever.
+    if ($MaxChunks -gt 0) {
+      throw
+    }
+
     Start-Sleep -Seconds $SleepOnErrorSec
+  }
+
+  if ($MaxChunks -gt 0 -and $chunkIndex -ge $MaxChunks) {
+    Write-Host ("[forever] MaxChunks reached ({0}); exiting." -f $MaxChunks) -ForegroundColor Cyan
+    break
   }
 }

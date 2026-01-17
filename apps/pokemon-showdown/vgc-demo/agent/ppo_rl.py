@@ -12,7 +12,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-ACTIONS_PER_ACTIVE = 34
+ACTIONS_PER_ACTIVE = 107
+
+
+# Move action subspace is laid out as (moveSlot * target * teraFlag).
+# With the current encoding, tera=1 corresponds to odd indices within the move range.
+MOVE_ACTIONS = 4 * 7 * 2
+
+
+def _is_tera_move_action(action_id: int) -> bool:
+    a = int(action_id)
+    return 0 <= a < MOVE_ACTIONS and (a % 2) == 1
+
+
+def _mask_out_tera_actions(mask: List[int]) -> List[int]:
+    m = list(mask)
+    for i in range(1, MOVE_ACTIONS, 2):
+        m[i] = 0
+    return m
 
 
 @dataclass
@@ -42,7 +59,9 @@ def default_snapshot_dir() -> Path:
     if env:
         return Path(env)
     root = _repo_root_from_here(Path(__file__))
-    return root / "data" / "pokemon-showdown" / "vgc-demo" / "ppo_snapshots"
+    # Include action dimension in the folder name so incompatible checkpoints
+    # (e.g., older 34-dim policies) are never loaded by accident.
+    return root / "data" / "pokemon-showdown" / "vgc-demo" / f"ppo_snapshots_a{ACTIONS_PER_ACTIVE}"
 
 
 def masked_categorical_sample(logits: torch.Tensor, mask: torch.Tensor, sample: bool, seed: Optional[int] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -274,12 +293,34 @@ class PpoService:
 
         # Baseline: uniform random over legal actions.
         if policy_id == "baseline":
-            ml = torch.tensor([mask_left], device=self.device)
-            mr = torch.tensor([mask_right], device=self.device)
+            # To respect the "only one tera per turn" rule in doubles, sample sequentially
+            # and mask out tera actions for the second pick when needed.
+            left_first = seed is None or (int(seed) & 1) == 0
+
+            ml_list = list(mask_left)
+            mr_list = list(mask_right)
+            ml = torch.tensor([ml_list], device=self.device)
+            mr = torch.tensor([mr_list], device=self.device)
             # logits all zeros -> uniform over masked
             zeros = torch.zeros((1, ACTIONS_PER_ACTIVE), device=self.device)
-            a_l, logp_l, _ = masked_categorical_sample(zeros, ml, sample=True, seed=seed)
-            a_r, logp_r, _ = masked_categorical_sample(zeros, mr, sample=True, seed=None if seed is None else seed + 1)
+            if left_first:
+                a_l, logp_l, _ = masked_categorical_sample(zeros, ml, sample=True, seed=seed)
+                mr2_list = mr_list
+                if _is_tera_move_action(int(a_l.item())):
+                    mr2_list = _mask_out_tera_actions(mr_list)
+                    if sum(1 for x in mr2_list if int(x) != 0) <= 0:
+                        mr2_list = mr_list
+                mr2 = torch.tensor([mr2_list], device=self.device)
+                a_r, logp_r, _ = masked_categorical_sample(zeros, mr2, sample=True, seed=None if seed is None else seed + 1)
+            else:
+                a_r, logp_r, _ = masked_categorical_sample(zeros, mr, sample=True, seed=seed)
+                ml2_list = ml_list
+                if _is_tera_move_action(int(a_r.item())):
+                    ml2_list = _mask_out_tera_actions(ml_list)
+                    if sum(1 for x in ml2_list if int(x) != 0) <= 0:
+                        ml2_list = ml_list
+                ml2 = torch.tensor([ml2_list], device=self.device)
+                a_l, logp_l, _ = masked_categorical_sample(zeros, ml2, sample=True, seed=None if seed is None else seed + 1)
             return {
                 "a_left": int(a_l.item()),
                 "a_right": int(a_r.item()),
@@ -304,8 +345,24 @@ class PpoService:
         ml = torch.tensor([mask_left], device=self.device)
         mr = torch.tensor([mask_right], device=self.device)
 
-        a_l, logp_l, ent_l = masked_categorical_sample(logits_l, ml, sample=sample, seed=seed)
-        a_r, logp_r, ent_r = masked_categorical_sample(logits_r, mr, sample=sample, seed=None if seed is None else seed + 1)
+        # Enforce the "only one tera per turn" rule by sampling sequentially.
+        left_first = seed is None or (int(seed) & 1) == 0
+        if left_first:
+            a_l, logp_l, ent_l = masked_categorical_sample(logits_l, ml, sample=sample, seed=seed)
+            mr2 = mr
+            if _is_tera_move_action(int(a_l.item())):
+                mr2_list = _mask_out_tera_actions(mask_right)
+                if sum(1 for x in mr2_list if int(x) != 0) > 0:
+                    mr2 = torch.tensor([mr2_list], device=self.device)
+            a_r, logp_r, ent_r = masked_categorical_sample(logits_r, mr2, sample=sample, seed=None if seed is None else seed + 1)
+        else:
+            a_r, logp_r, ent_r = masked_categorical_sample(logits_r, mr, sample=sample, seed=seed)
+            ml2 = ml
+            if _is_tera_move_action(int(a_r.item())):
+                ml2_list = _mask_out_tera_actions(mask_left)
+                if sum(1 for x in ml2_list if int(x) != 0) > 0:
+                    ml2 = torch.tensor([ml2_list], device=self.device)
+            a_l, logp_l, ent_l = masked_categorical_sample(logits_l, ml2, sample=sample, seed=None if seed is None else seed + 1)
 
         return {
             "a_left": int(a_l.item()),

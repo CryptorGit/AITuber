@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <title>AITuber Console - Tetris AI</title>
+    <link rel="stylesheet" href="/console/tetris/tetris.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>Tetris AI</h1>
+      <div class="links">
+        <a href="/console">Console</a>
+        <a href="/stage" target="_blank" rel="noreferrer">Stage</a>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button data-tab="checkpoints" class="active">Checkpoints</button>
+      <button data-tab="episodes">Episodes</button>
+      <button data-tab="metrics">Metrics</button>
+    </nav>
+
+    <main>
+      <section id="tab-checkpoints" class="tab active">
+        <div class="card">
+          <h2>Checkpoints</h2>
+          <div class="toolbar">
+            <button id="reloadCheckpoints">Reload</button>
+          </div>
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Checkpoint</th>
+                  <th>Step</th>
+                  <th>Mean Lines</th>
+                  <th>Mean Reward</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody id="checkpointTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-episodes" class="tab">
+        <div class="row">
+          <div class="card">
+            <h2>Episodes</h2>
+            <div class="toolbar">
+              <span id="selectedCheckpoint">(no checkpoint)</span>
+              <button id="reloadEpisodes">Reload</button>
+            </div>
+            <div class="grid" id="episodeGrid"></div>
+          </div>
+
+          <div class="card">
+            <h2>Playback</h2>
+            <video id="episodeVideo" controls></video>
+            <canvas id="frameCanvas" width="240" height="480"></canvas>
+            <div class="playerControls">
+              <button id="framePrev">◀</button>
+              <span id="frameStatus">0 / 0</span>
+              <button id="frameNext">▶</button>
+            </div>
+            <div class="stats" id="frameStats"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-metrics" class="tab">
+        <div class="card">
+          <h2>Metrics</h2>
+          <div class="toolbar">
+            <label>Run</label>
+            <select id="metricsRun"></select>
+            <button id="reloadMetrics">Reload</button>
+          </div>
+          <canvas id="metricsCanvas" width="900" height="320"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <script src="/console/tetris/tetris.js"></script>
+  </body>
+</html>

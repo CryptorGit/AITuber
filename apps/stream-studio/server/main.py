@@ -16,6 +16,7 @@ import anyio
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
@@ -1444,6 +1445,91 @@ def root() -> RedirectResponse:
     return RedirectResponse(url="/stage")
 
 
+@app.get("/console/tetris")
+def console_tetris() -> RedirectResponse:
+    return RedirectResponse(url="/console/tetris/index.html")
+
+
+def _tetris_data_root() -> Path:
+    return Path("data/tetris-ai")
+
+
+def _split_checkpoint_id(checkpoint_id: str) -> Optional[tuple[str, str]]:
+    parts = [p for p in checkpoint_id.split("/") if p]
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
+@app.get("/api/tetris/checkpoints")
+def tetris_checkpoints() -> Dict[str, Any]:
+    root = _tetris_data_root() / "checkpoints"
+    items: List[Dict[str, Any]] = []
+    if not root.exists():
+        return {"ok": True, "items": []}
+
+    for p in root.rglob("*.json"):
+        try:
+            obj = read_json(p)
+            if not isinstance(obj, dict):
+                continue
+            if "run_id" not in obj:
+                # best-effort derive from path
+                try:
+                    obj["run_id"] = p.parent.name
+                except Exception:
+                    pass
+            items.append(obj)
+        except Exception:
+            continue
+    items = sorted(items, key=lambda x: str(x.get("checkpoint_id", "")))
+    return {"ok": True, "items": items}
+
+
+@app.get("/api/tetris/checkpoints/{checkpoint_id:path}/episodes")
+def tetris_checkpoint_episodes(checkpoint_id: str, offset: int = 0, limit: int = 200) -> Dict[str, Any]:
+    parts = _split_checkpoint_id(checkpoint_id)
+    if not parts:
+        return {"ok": False, "items": [], "error": "invalid_checkpoint_id"}
+    run_id, ckpt_id = parts
+    index_path = _tetris_data_root() / "replays" / run_id / ckpt_id / "index.json"
+    data = read_json(index_path)
+    if not isinstance(data, dict):
+        return {"ok": True, "items": []}
+    items = data.get("episodes") or []
+    start = max(0, int(offset))
+    end = start + max(1, int(limit))
+    return {"ok": True, "items": items[start:end], "total": len(items)}
+
+
+@app.get("/api/tetris/episodes/{episode_id:path}")
+def tetris_episode(episode_id: str) -> Response:
+    # episode_id format: run_id/checkpoint_id/episode_xxx.jsonl
+    path = _tetris_data_root() / "replays" / episode_id
+    if not path.exists():
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not_found"})
+    return Response(content=path.read_text(encoding="utf-8"), media_type="text/plain")
+
+
+@app.get("/api/tetris/videos/{asset_path:path}")
+def tetris_videos(asset_path: str) -> Response:
+    # Serve videos or thumbs (best-effort fallback)
+    video_path = _tetris_data_root() / "videos" / asset_path
+    if video_path.exists():
+        return FileResponse(video_path)
+    thumb_path = _tetris_data_root() / "thumbs" / asset_path
+    if thumb_path.exists():
+        return FileResponse(thumb_path)
+    return JSONResponse(status_code=404, content={"ok": False, "error": "not_found"})
+
+
+@app.get("/api/tetris/metrics")
+def tetris_metrics(run_id: str, limit: int = 2000) -> Dict[str, Any]:
+    path = _tetris_data_root() / "metrics" / run_id / "events.jsonl"
+    items = tail_jsonl(path, max_lines=limit)
+    return {"ok": True, "items": items}
+
+
 @app.get("/api/models/index")
 def models_index() -> Dict[str, Any]:
     """List available .model3.json files under data/stream-studio/web/models.
@@ -2449,7 +2535,7 @@ def _split_sentences(text: str) -> tuple[list[str], str]:
         return [], ""
     buf = text
     out: list[str] = []
-    seps = set(["邵ｲ繝ｻ, "繝ｻ繝ｻ, "?", "繝ｻ繝ｻ, "!", "\n"])
+    seps = set(["。", "、", "?", "？", "!", "！", "\n"])
     start = 0
     for i, ch in enumerate(buf):
         if ch in seps:
@@ -2486,11 +2572,11 @@ def _sanitize_speech_text_for_tts(*, text: str) -> str:
     # Strip common acknowledgements that models sometimes prepend.
     # (Do NOT over-strip; only remove if it appears at the very beginning.)
     ack_prefixes = (
-        "邵ｺ・ｯ邵ｺ繝ｻﾂ繧井ｾ｡驕擾ｽ･邵ｺ繝ｻ笳・ｸｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・ｸｲ繝ｻ,
-        "邵ｺ・ｯ邵ｺ繝ｻﾂ竏ｵ萓｡驕擾ｽ･邵ｺ繝ｻ笳・ｸｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・ｸｲ繝ｻ,
-        "隰・ｽｿ驕擾ｽ･邵ｺ繝ｻ笳・ｸｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・ｸｲ繝ｻ,
-        "闔繝ｻ・ｧ・｣邵ｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・ｸｲ繝ｻ,
-        "闔繝ｻ・ｧ・｣邵ｲ繝ｻ,
+        "了解です。",
+        "了解しました。",
+        "承知しました。",
+        "かしこまりました。",
+        "はい。",
     )
     changed = True
     while changed:
@@ -2534,7 +2620,7 @@ def _stream_llm_text(
     prov = (llm_provider or "").strip().lower() or "gemini"
     # Gemini fallback (non-stream or SDK-dependent stream)
     if not (settings.gemini_api_key or "").strip():
-        return "繝ｻ繝ｻemini API郢ｧ・ｭ郢晢ｽｼ隴幢ｽｪ髫ｪ・ｭ陞ｳ繝ｻ 郢晁ｼ斐°郢晢ｽｼ郢晢ｽｫ郢晁・繝｣郢ｧ・ｯ繝ｻ繝ｻ
+        return "Gemini API key is missing; fallback response."
 
     timeout_seconds = 20
     try:
@@ -2558,11 +2644,11 @@ def _stream_llm_text(
             resp = fut.result(timeout=timeout_seconds)
 
         out = (getattr(resp, "text", "") or "").strip()
-        return out or "闔繝ｻ・ｧ・｣邵ｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・ｸｲ繝ｻ
+        return out or "(empty response)"
     except concurrent.futures.TimeoutError:
-        return "繝ｻ繝ｻemini timeout: 郢晁ｼ斐°郢晢ｽｼ郢晢ｽｫ郢晁・繝｣郢ｧ・ｯ繝ｻ繝ｻ
+        return "Gemini timeout: request exceeded time limit."
     except Exception:
-        return "闔繝ｻ・ｧ・｣邵ｺ蜉ｱ竏ｪ邵ｺ蜉ｱ笳・ｸｲ繝ｻ
+        return "Gemini request failed."
 
 
 @app.get("/state/live2d")
@@ -3235,8 +3321,8 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
                 # If generation yielded nothing, make it explicit so the UI has something to render.
                 if not (full_text or "").strip():
                     st_now = read_json(st_path) or {}
-                    st_now["speech_text"] = "繝ｻ驛・ｽｿ逧ｮ・ｭ逧ｮ蜃ｽ隰瑚・竊楢棔・ｱ隰ｨ蜉ｱ・邵ｺ・ｾ邵ｺ蜉ｱ笳・・繝ｻ
-                    st_now["overlay_text"] = "繝ｻ驛・ｽｿ逧ｮ・ｭ逧ｮ蜃ｽ隰瑚・竊楢棔・ｱ隰ｨ證ｦ・ｼ繝ｻ
+                    st_now["speech_text"] = "(no output)"
+                    st_now["overlay_text"] = "(no output)"
                     st_now["tts"] = {"provider": "google", "error": "empty_llm_output"}
                     st_now["updated_at"] = utc_iso()
                     write_json(st_path, st_now)
@@ -3260,8 +3346,8 @@ def web_submit(req: WebSubmitIn) -> Dict[str, Any]:
 
                 try:
                     st_now = read_json(st_path) or {}
-                    st_now["speech_text"] = "繝ｻ莠･繝ｻ鬩幢ｽｨ郢ｧ・ｨ郢晢ｽｩ郢晢ｽｼ邵ｺ讙主験騾墓ｺ假ｼ邵ｺ・ｾ邵ｺ蜉ｱ笳・・繝ｻ
-                    st_now["overlay_text"] = "繝ｻ莠･繝ｻ鬩幢ｽｨ郢ｧ・ｨ郢晢ｽｩ郢晢ｽｼ繝ｻ繝ｻ
+                    st_now["speech_text"] = "(error)"
+                    st_now["overlay_text"] = "(error)"
                     st_now["tts"] = {"provider": "google", "error": f"{type(e).__name__}: {e}"[:200]}
                     st_now["updated_at"] = utc_iso()
                     write_json(st_path, st_now)

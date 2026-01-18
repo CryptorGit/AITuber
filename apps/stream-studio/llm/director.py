@@ -10,11 +10,11 @@ def _pick_emotion(text: str) -> Emotion:
     t = (text or "").strip()
     if not t:
         return Emotion.neutral
-    if any(x in t for x in ("!", "・・)):
+    if any(x in t for x in ("!", "！")):
         return Emotion.happy
-    if any(x in t for x in ("?", "・・)):
+    if any(x in t for x in ("?", "？")):
         return Emotion.surprised
-    if any(x in t for x in ("窶ｦ", "...")):
+    if any(x in t for x in ("…", "...")):
         return Emotion.smug
     return Emotion.neutral
 
@@ -41,12 +41,12 @@ class Director:
         motion_tags = _pick_motion_tags(emotion)
         text = (user_text or "").strip()
         if not text:
-            text = "・亥・蜉帙′遨ｺ縺縺｣縺溘・縺ｧ縲√・縺ｨ縺ｾ縺壽肩諡ｶ縺吶ｋ縺ｭ・・
+            text = "内容が空でした。"
             emotion = Emotion.neutral
             motion_tags = ["neutral"]
 
         return DirectorOutput(
-            text=f"莠・ｧ｣・√施text}縲上□縺ｭ縲・,
+            text=f"要約: {text}",
             emotion=emotion,
             motion_tags=motion_tags,
             reply_to=reply_to or ReplyTo(type="system"),

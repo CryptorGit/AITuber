@@ -110,6 +110,7 @@ if (Wait-Healthy -BaseUrl $baseUrl -TimeoutSeconds 2) {
   Write-Host "[run_stack] Server already running: $baseUrl" -ForegroundColor Green
   Write-Host "Console: http://$HostAddr`:$Port/console" -ForegroundColor Green
   Write-Host "Stage:   http://$HostAddr`:$Port/stage" -ForegroundColor Green
+  Write-Host "Tetris:  http://$HostAddr`:$Port/console/tetris" -ForegroundColor Green
   return
 }
 
@@ -132,6 +133,7 @@ Write-Host ''
 Write-Host '---' -ForegroundColor DarkGray
 Write-Host "Console: http://$HostAddr`:$Port/console" -ForegroundColor Green
 Write-Host "Stage:   http://$HostAddr`:$Port/stage" -ForegroundColor Green
+Write-Host "Tetris:  http://$HostAddr`:$Port/console/tetris" -ForegroundColor Green
 Write-Host '---' -ForegroundColor DarkGray
 
 if ($Reload) {

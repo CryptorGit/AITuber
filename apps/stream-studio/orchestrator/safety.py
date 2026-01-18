@@ -18,7 +18,7 @@ class SafetyFilter:
                 continue
             if ww in txt:
                 safe = out.model_copy(deep=True)
-                safe.text = "・亥ｮ牙・縺ｮ縺溘ａ逵∫払・・
+                safe.text = "安全上の理由で非表示"
                 safe.emotion = Emotion.neutral
                 safe.motion_tags = []
                 safe.debug.reason = "blocked_by_ng_word"

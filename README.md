@@ -43,4 +43,5 @@ cd .
 - [docs/stream-studio/runbook.md](docs/stream-studio/runbook.md)
 - [docs/stream-studio/ARCHITECTURE.md](docs/stream-studio/ARCHITECTURE.md)
 - [docs/stream-studio/schemas.md](docs/stream-studio/schemas.md)
+- [docs/tetris-ai/overview.md](docs/tetris-ai/overview.md)
 

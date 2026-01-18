@@ -84,7 +84,7 @@ class GeminiMVP:
 
     def generate_fast_ack(self, *, user_text: str, rag_context: str, vlm_summary: str) -> LLMOut:
         _ = (rag_context, vlm_summary)
-        ack = "莠・ｧ｣縲・
+        ack = "了解です。"
         return LLMOut(
             speech_text=ack,
             overlay_text=ack,
@@ -203,7 +203,7 @@ class GeminiMVP:
     def _wrap_plain_text(self, *, text: str, reason: str) -> LLMOut:
         t = (text or "").strip()
         if not t:
-            t = "・育ｩｺ縺ｮ霑皮ｭ費ｼ・
+            t = "返答が空でした。"
         overlay = t[:60]
         return LLMOut(
             speech_text=t,
@@ -238,7 +238,7 @@ class GeminiMVP:
         rc = (rag_context or "").strip()
         if rc:
             parts.append("[RAG]\n" + rc)
-        body = "\n\n".join([p for p in parts if p]).strip() or "・亥・蜉帙↑縺暦ｼ・
+        body = "\n\n".join([p for p in parts if p]).strip() or "入力が空でした。"
         if sys:
             return (sys + "\n\n" + body).strip() + "\n"
         return body.strip() + "\n"
@@ -258,7 +258,7 @@ class GeminiMVP:
     def _fallback(self, *, user_text: str, reason: str) -> LLMOut:
         t = (user_text or "").strip()
         if not t:
-            t = "・亥・蜉帙↑縺暦ｼ・
+            t = "入力が空でした。"
 
         # Deterministic, non-echo fallback: avoid repeating the user's input,
         # which looks like a broken LLM.
@@ -266,15 +266,15 @@ class GeminiMVP:
         is_greeting = any(
             k in t
             for k in (
-                "縺薙ｓ縺ｫ縺｡縺ｯ",
-                "縺薙ｓ縺ｰ繧薙・",
-                "縺翫・繧医≧",
-                "繧・≠",
-                "縺ｯ縺倥ａ縺ｾ縺励※",
+                "こんにちは",
+                "こんばんは",
+                "おはよう",
+                "やあ",
+                "はじめまして",
             )
         ) or any(k in low for k in ("hello", "hi"))
 
-        speech = "縺薙ｓ縺ｫ縺｡縺ｯ縲・ if is_greeting else "莠・ｧ｣縺励∪縺励◆縲・
+        speech = "こんにちは。" if is_greeting else "了解しました。"
         overlay = speech[:60]
         return LLMOut(
             speech_text=speech,
